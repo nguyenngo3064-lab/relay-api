@@ -1,0 +1,23 @@
+{
+  "name": "huan-relay",
+  "version": "1.0.0",
+  "description": "HUAN RELAY - self-hosted OpenAI-compatible AI API gateway",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "setup:check": "node src/cli/setup.js",
+    "test": "node --test 'test/*.test.js'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nguyenngo3064-lab/relay-api.git"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "fastify": "^5.12.7"
+  }
+}

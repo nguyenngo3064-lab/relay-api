@@ -1,0 +1,38 @@
+# Secrets and environment
+.env
+.env.*
+!.env.example
+
+# Database (persistent usage history and encrypted credentials)
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+logs/
+*.log
+
+# Backups may contain secrets
+backups/
+*.bak
+
+# Generated private keys / certs
+*.pem
+*.key
+
+# Node
+dist/
+node_modules/
+coverage/
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Installed agent skills (tooling artifacts, not part of the app)
+.agents/
+skills-lock.json
