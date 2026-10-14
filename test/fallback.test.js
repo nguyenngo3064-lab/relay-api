@@ -1,6 +1,3 @@
-// test/fallback.test.js
-// Explicit fallback and Reset RAM API behavior.
-
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTestApp, loginAdmin, startMockUpstream } from './helpers.js';
@@ -46,7 +43,6 @@ async function admin() {
 
 test('reset ram does not delete persistent configuration or history', async () => {
   const { cookie, csrf, provider, rawKey } = await admin();
-  // Generate some usage.
   await ctx.app.inject({
     method: 'POST', url: '/v1/chat/completions',
     headers: { authorization: `Bearer ${rawKey}` },
@@ -62,7 +58,6 @@ test('reset ram does not delete persistent configuration or history', async () =
   assert.ok(body.preserved.includes('providers'));
   assert.ok(body.preserved.includes('usage_history'));
 
-  // Provider still present; usage history still present.
   const after = await ctx.app.inject({ method: 'GET', url: '/api/admin/providers', headers: { cookie } });
   assert.equal(after.json().providers.length, 1);
   assert.equal(after.json().providers[0].id, provider.id);
@@ -80,21 +75,18 @@ test('relay falls back to the configured fallback credential when primary is rat
     headers: { cookie, 'x-csrf-token': csrf },
     payload: { rateLimitRpm: 1, minIntervalMs: 100000, maxConcurrency: 1 },
   });
-  // First request consumes the primary's single slot.
   const first = await ctx.app.inject({
     method: 'POST', url: '/v1/chat/completions',
     headers: { authorization: `Bearer ${rawKey}` },
     payload: { model: 'nvidia/nemotron-3-ultra', messages: [{ role: 'user', content: 'hi' }] },
   });
   assert.equal(first.statusCode, 200);
-  // Second request: primary is rate-limited (min interval), should use fallback.
   const second = await ctx.app.inject({
     method: 'POST', url: '/v1/chat/completions',
     headers: { authorization: `Bearer ${rawKey}` },
     payload: { model: 'nvidia/nemotron-3-ultra', messages: [{ role: 'user', content: 'hi' }] },
   });
   assert.equal(second.statusCode, 200);
-  // A fallback event should be recorded.
   const usage = await ctx.app.inject({ method: 'GET', url: '/api/admin/usage', headers: { cookie } });
   const hasFallback = usage.json().events.some((e) => e.status === 'fallback');
   assert.ok(hasFallback, 'expected a fallback event');

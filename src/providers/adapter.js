@@ -12,7 +12,6 @@ export function buildOpenAIChatRequest(normalized, provider) {
     messages: normalized.messages,
     stream: !!normalized.stream,
   };
-  // Token limit: prefer the provider/model's preferred field.
   if (normalized.maxTokens != null) {
     if (provider?.capabilities?.useMaxCompletionTokens) {
       body.max_completion_tokens = normalized.maxTokens;

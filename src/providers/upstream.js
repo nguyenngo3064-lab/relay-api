@@ -70,7 +70,6 @@ export async function requestJson(opts) {
       signal: controller.signal,
     });
 
-    // Handle redirect manually and re-validate each hop.
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
       const location = res.headers.get('location');
       const next = new URL(location, safeUrl).toString();
@@ -84,7 +83,6 @@ export async function requestJson(opts) {
 
     const reader = res.body?.getReader?.();
     if (!reader) {
-      // Some environments may not return a stream; fall back to arrayBuffer.
       const buf = Buffer.from(await res.arrayBuffer());
       return finishNonStream(res, buf, started, maxResponseBytes);
     }

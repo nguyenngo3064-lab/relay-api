@@ -109,6 +109,5 @@ export class LiveMetrics {
     this.completionTokens = 0;
     this.totalTokens = 0;
     this.compressionFallbacks = 0;
-    // startedAt preserved so uptime is meaningful.
   }
 }

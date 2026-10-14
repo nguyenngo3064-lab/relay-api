@@ -47,4 +47,3 @@ export function clearCsrfCookie(reply, { isHttps }) {
   if (isHttps) parts.push('Secure');
   reply.raw.setHeader('set-cookie', [...(reply.raw.getHeader('set-cookie') || []), parts.join('; ')]);
 }
-

@@ -69,7 +69,6 @@ export class Scheduler {
         retryAfterMs: cred.minIntervalMs - (now - s.lastStart),
       };
     }
-    // Reserve slot.
     s.windowCount += 1;
     s.inFlight += 1;
     s.lastStart = now;
@@ -131,7 +130,6 @@ export class Scheduler {
       s.inFlight = 0;
       s.windowCount = 0;
       s.windowStart = Date.now();
-      // cooldownUntil and consecutiveFailures intentionally preserved.
     }
   }
 }

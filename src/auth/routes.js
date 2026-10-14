@@ -25,7 +25,6 @@ export async function authRoutes(fastify, opts) {
     return csrfToken;
   }
 
-  // Bootstrap status: is an admin account configured yet?
   fastify.get('/api/auth/status', async () => {
     return { setupRequired: !hasAdminAccount(opts.db) };
   });
@@ -53,7 +52,6 @@ export async function authRoutes(fastify, opts) {
     return { ok: true, csrfToken };
   });
 
-  // Login
   fastify.post('/api/auth/login', async (request, reply) => {
     const gate = rateLimiter.check(
       'login:' + request.ip,
@@ -67,7 +65,6 @@ export async function authRoutes(fastify, opts) {
     }
     const account = getAdminAccount(opts.db);
     const { password, remember } = request.body || {};
-    // Uniform failure to avoid account-existence oracle.
     if (!account || typeof password !== 'string' || !(await verifyPassword(password, account.passwordRecord))) {
       logger.warn('failed login attempt', { ip: request.ip });
       return reply.code(401).send({ error: { code: 'INVALID_CREDENTIALS', message: 'Invalid credentials.' } });
@@ -79,7 +76,6 @@ export async function authRoutes(fastify, opts) {
     return { ok: true, csrfToken, mustChangePassword: account.mustChange };
   });
 
-  // Logout
   fastify.post('/api/auth/logout', { preHandler: fastify.requireAdmin }, async (request, reply) => {
     if (request.authSession) sessionService.destroy(request.authSession.id);
     clearCsrfCookie(reply, { isHttps });

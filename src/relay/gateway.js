@@ -32,7 +32,6 @@ export function buildGatewayPool(db) {
   return pool;
 }
 
-// Rotating cursor shared across requests for round-robin distribution.
 let rrCursor = 0;
 
 /** Order the pool starting at the next round-robin position. */

@@ -31,7 +31,6 @@ export function normalizeChatRequest(body) {
 
   const stream = body.stream === true;
 
-  // Explicit handling of both max_tokens and max_completion_tokens.
   let maxTokens = null;
   if (Number.isFinite(body.max_tokens)) maxTokens = body.max_tokens;
   else if (Number.isFinite(body.max_completion_tokens)) maxTokens = body.max_completion_tokens;
@@ -87,7 +86,6 @@ function normalizeMessage(m, index) {
     );
   }
   const out = { role: m.role };
-  // content may be string or array of content parts.
   if (typeof m.content === 'string') out.content = m.content;
   else if (Array.isArray(m.content)) out.content = m.content;
   else if (m.content === null) out.content = null;

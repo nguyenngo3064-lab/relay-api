@@ -1,8 +1,3 @@
-// test/attachedPrompt.test.js
-// The admin-configured attached prompt is appended (as a trailing system
-// message) to every relayed request for that provider, and the dashboard UI
-// language setting (en/vi) persists through the settings API.
-
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTestApp, loginAdmin, startMockUpstream } from './helpers.js';

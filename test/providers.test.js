@@ -1,7 +1,3 @@
-// test/providers.test.js
-// Provider integration and relay tests against a controlled mock upstream
-// server (simulated upstream environment; NOT a real provider).
-
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTestApp, loginAdmin, startMockUpstream } from './helpers.js';
@@ -111,7 +107,6 @@ test('relay returns 404 for an unconfigured model', async () => {
   const res = await ctx.app.inject({ method: 'POST', url: '/v1/chat/completions', headers: { authorization: 'Bearer ' + rawKey }, payload: { model: 'does/not-exist', messages: [{ role: 'user', content: 'hi' }] } });
   assert.equal(res.statusCode, 404);
   assert.equal(res.json().error.code, 'MODEL_UNAVAILABLE');
-  // The error must list the configured models so clients know what to send.
   assert.match(res.json().error.message, /Available models: nvidia\/nemotron-3-ultra/);
 });
 

@@ -138,4 +138,3 @@ export function loadConfig(env = process.env) {
 export function generateHexSecret(bytes = 32) {
   return randomBytes(bytes).toString('hex');
 }
-

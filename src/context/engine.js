@@ -77,7 +77,6 @@ function looksLikeCode(text) {
   return /```|\bfunction\b|\bclass\b|\bconst\b|\bimport\b|\bdef \b|<\/?[a-z]+>|\{\s*"[^"]+"\s*:/.test(text);
 }
 
-// Stage A + B: inventory and requirement extraction. Roles are NOT flattened.
 function analyze(messages) {
   const inventory = {
     total: messages.length,
@@ -106,7 +105,6 @@ function analyze(messages) {
   return inventory;
 }
 
-// Stage C: relevance filtering.
 function relevanceFilter(messages, inventory, mode) {
   const remove = new Set();
   for (const [, indices] of inventory.duplicates) {
@@ -141,7 +139,6 @@ function relevanceFilter(messages, inventory, mode) {
   return { messages: kept, keptIndices, removed: [...remove].sort((a, b) => a - b) };
 }
 
-// Stage D (optional): local heuristic compression of long assistant history.
 function semanticCompress(messages, inventory, settings) {
   if (!settings.semanticSummarization) return { messages, summarized: [] };
   const result = [];
@@ -191,7 +188,6 @@ function validateStructure(original, processed) {
   return errors;
 }
 
-// Main entry point.
 export function processContext(messages, settings = {}) {
   const cfg = { ...DEFAULT_SETTINGS, ...settings };
   const original = clone(messages);

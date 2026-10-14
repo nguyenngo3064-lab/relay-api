@@ -80,10 +80,6 @@ export async function buildApp(overrides = {}) {
     trustProxy: config.trustedProxy,
   });
 
-  // Lenient JSON body parser. Accepts any charset on application/json, treats an
-  // empty/whitespace-only body as {} so route validation returns a precise error
-  // (e.g. "messages is required") instead of a generic "not valid JSON", and
-  // raises a clean INVALID_REQUEST on genuinely malformed JSON.
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
     const text = body == null ? '' : String(body).trim();
     if (text === '') return done(null, {});
@@ -100,8 +96,6 @@ export async function buildApp(overrides = {}) {
   const isHttps = config.isProd && config.trustedProxy; // assume TLS at proxy
   registerSecurityHeaders(app, { isHttps });
 
-  // Apply auth directly to the root instance so requireAdmin and the auth hook
-  // are shared across all routes (no encapsulation boundary).
   applyAuth(app, {
     sessionService,
     sessionSecret: config.sessionSecret,
@@ -134,7 +128,6 @@ export async function buildApp(overrides = {}) {
   app.setErrorHandler((err, request, reply) => {
     const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 500;
 
-    // Body parser / validation problems -> clean 400.
     if (
       err.code === 'FST_ERR_CTP_INVALID_JSON_BODY' ||
       err.code === 'FST_ERR_CTP_EMPTY_JSON_BODY' ||
@@ -150,7 +143,6 @@ export async function buildApp(overrides = {}) {
       return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message } });
     }
 
-    // Validation errors (schema) -> 400 with first message.
     if (err.validation) {
       return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: err.message || 'Invalid request.' } });
     }
@@ -164,8 +156,6 @@ export async function buildApp(overrides = {}) {
   });
 
   app.setNotFoundHandler((request, reply) => {
-    // Unmatched routes (e.g. unknown method/path) get a consistent JSON 404.
-    // The SPA shell is served by the explicit app.get('/*') route above.
     return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Not found.' } });
   });
 
@@ -181,7 +171,6 @@ export async function buildApp(overrides = {}) {
   });
 
   app.get('/*', async (request, reply) => {
-    // Only serve the SPA shell for non-API GET routes.
     if (request.url.startsWith('/api/') || request.url.startsWith('/v1/') || request.url === '/app.js') {
       return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Not found.' } });
     }
@@ -201,4 +190,3 @@ export async function buildApp(overrides = {}) {
 
   return app;
 }
-

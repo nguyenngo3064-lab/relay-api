@@ -10,7 +10,6 @@ export function estimateTokensForText(text) {
   if (text == null) return 0;
   const s = String(text);
   if (s.length === 0) return 0;
-  // ~4 chars per token on average for English/code mix.
   return Math.ceil(s.length / 4);
 }
 

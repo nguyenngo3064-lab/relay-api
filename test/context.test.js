@@ -1,7 +1,3 @@
-// test/context.test.js
-// Context filtering engine tests: preservation, dedupe, structured/code
-// preservation, tool-call validity, fallback behavior, and disabled mode.
-
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { processContext, MODES } from '../src/context/engine.js';
@@ -45,7 +41,6 @@ test('duplicate content is removed safely in safe mode', () => {
   const r = processContext(msgs, { enabled: true, mode: MODES.SAFE, minSavingsRatio: 0.01 });
   assert.ok(r.usedTransformed);
   assert.equal(r.metrics.removedCount, 1);
-  // The current task is preserved.
   assert.ok(r.messages.some((m) => /current task/.test(m.content)));
 });
 
@@ -73,7 +68,6 @@ test('tool calls remain valid (no orphan tool results)', () => {
     { role: 'tool', tool_call_id: 'call_1', content: 'result' },
   ];
   const r = processContext(msgs, { enabled: true, mode: MODES.SMART });
-  // Validation should pass: no orphan tool results introduced.
   assert.deepEqual(r.validation.errors, []);
   assert.ok(r.messages.some((m) => m.role === 'tool' && m.tool_call_id === 'call_1'));
 });
@@ -84,11 +78,8 @@ test('token estimates are labeled as estimates', () => {
 });
 
 test('safe fallback restores original when validation would fail', () => {
-  // A single system message that would be the only message; forcing removal of
-  // all messages triggers fallback.
   const msgs = [{ role: 'system', content: 'only system' }];
   const r = processContext(msgs, { enabled: true, mode: MODES.SMART, minSavingsRatio: 0 });
-  // Nothing removed (protected), so it stays original and valid.
   assert.equal(r.validation.ok, true);
   assert.equal(r.messages.length, 1);
 });

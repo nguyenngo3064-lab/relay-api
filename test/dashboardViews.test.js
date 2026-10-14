@@ -1,10 +1,3 @@
-// test/dashboardViews.test.js
-// Regression tests for the dashboard client views. The dashboard is a plain
-// IIFE (no module exports, CSP-safe), so we evaluate the view functions with
-// stubbed helpers and feed them the EXACT shapes the real API returns. This
-// catches view/API shape mismatches like the providers list silently rendering
-// empty even though providers exist in the database.
-
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -32,8 +25,6 @@ function loadView(name) {
   const fmtBytes = () => '1 MB';
   const niceMax = (v) => (v <= 5 ? 5 : 10 ** Math.ceil(Math.log10(v)));
   const pieChart = (parts) => 'PIE:' + JSON.stringify(parts || []);
-  // Stub barChart for the views that embed it, but keep the real one when the
-  // test under examination IS barChart.
   const realBarChart = name === 'barChart';
   const barChart = (ts, title) => '<svg>' + title + '</svg>';
   if (!realBarChart) {
@@ -48,7 +39,6 @@ function loadView(name) {
 
 test('viewProviders renders existing providers from the real API shape', () => {
   const viewProviders = loadView('viewProviders');
-  // The API returns { providers: [ ... ] } (an array, NOT nested again).
   const d = {
     providers: [
       { id: 'p1', name: 'Old Provider A', baseUrl: 'https://api.a.test/v1', models: ['m1', 'm2'], enabled: true, credentials: [{ id: 'c1', label: 'primary', keyHint: 'sk-…abcd', enabled: true, isFallback: false }], attachedPrompt: 'Be brief.' },

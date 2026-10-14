@@ -24,7 +24,6 @@ export async function relayRoutes(fastify, opts) {
       return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'A valid HUAN RELAY client key is required.' } });
     }
 
-    // 2. Per-key rate limit.
     const gate = rateLimiter.check('relay:' + client.id, client.rateLimitRpm || 120, 60_000);
     if (!gate.allowed) {
       return reply.code(429).header('retry-after', String(Math.ceil(gate.retryAfterMs / 1000))).send({
@@ -36,7 +35,6 @@ export async function relayRoutes(fastify, opts) {
     // authenticated and rate-limited it is "admitted" and holds a slot for its
     // whole lifetime; when the gateway is saturated we reject with 429 +
     // Retry-After so a single valid key cannot open unbounded upstream calls.
-    // (HREL-2026-001)
     if (!concurrency.tryAcquire()) {
       metrics.record({ status: 'rate_limited', latencyMs: null });
       return reply.code(429).header('retry-after', '1').send({
@@ -45,9 +43,6 @@ export async function relayRoutes(fastify, opts) {
     }
 
     try {
-      // 4. Validate + normalize the request. For the master (gateway) key the
-      // `model` field is optional: any string is accepted and ignored, since the
-      // gateway load-balances across all provider keys server-side.
       let normalized;
       try {
         const isMaster = client.role === 'master';
@@ -90,7 +85,6 @@ export async function relayRoutes(fastify, opts) {
         return reply;
       }
 
-      // 6. Non-streaming path.
       try {
         const isMaster = client.role === 'master';
         const result = isMaster

@@ -4,7 +4,6 @@ import { createSession, getSession, touchSession, refreshSessionExpiry, deleteSe
 export const SESSION_COOKIE = 'hrel_session';
 export const IDLE_TTL_MS = 30 * 60 * 1000;
 export const ABSOLUTE_TTL_MS = 12 * 60 * 60 * 1000;
-// Default "remember me" lifetime: 30 days. Overridable via REMEMBER_TTL_DAYS.
 export const DEFAULT_REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function createSessionService(db, { rememberTtlMs = DEFAULT_REMEMBER_TTL_MS } = {}) {

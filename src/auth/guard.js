@@ -14,7 +14,6 @@ export function applyAuth(app, opts) {
 
   app.decorateRequest('authSession', null);
 
-  // Establish auth context from the session cookie on every request.
   app.addHook('onRequest', async (request) => {
     const sessionId = readSessionCookie(request);
     if (sessionId) {
@@ -55,5 +54,3 @@ export function applyAuth(app, opts) {
 
   app.decorate('hasAdmin', () => opts.hasAdmin());
 }
-
-

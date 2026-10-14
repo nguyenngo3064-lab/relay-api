@@ -12,10 +12,6 @@ const BASE_HEADERS = {
   'x-dns-prefetch-control': 'off',
 };
 
-// Restrictive CSP. The dashboard is served from the same origin and uses no
-// third-party scripts, no inline event handlers, and no remote fonts (system
-// fonts only). We allow 'self' scripts/styles and inline styles only for the
-// small amount of dynamic styling the dashboard uses.
 function buildCsp(isHttps) {
   const directives = [
     "default-src 'self'",
@@ -37,7 +33,7 @@ function buildCsp(isHttps) {
 /**
  * Build the full security header map (base headers + CSP + optional HSTS).
  * Used by the onSend hook for normal responses AND by the hijacked streaming
- * (SSE) path, which bypasses onSend (HREL-2026-002).
+ * (SSE) path, which bypasses onSend.
  */
 export function securityHeaders(isHttps = false) {
   const headers = { ...BASE_HEADERS, 'content-security-policy': buildCsp(isHttps) };

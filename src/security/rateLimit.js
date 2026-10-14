@@ -4,7 +4,6 @@
 
 export class RateLimiter {
   constructor() {
-    // key -> { count, resetAt }
     this.buckets = new Map();
     this.maxKeys = 5000;
     this.pruneTimer = setInterval(() => this.prune(), 60_000);
@@ -50,7 +49,6 @@ export class RateLimiter {
     for (const [key, bucket] of this.buckets) {
       if (bucket.resetAt <= now) this.buckets.delete(key);
     }
-    // Bound total size defensively.
     if (this.buckets.size > this.maxKeys) {
       const excess = this.buckets.size - this.maxKeys;
       let i = 0;

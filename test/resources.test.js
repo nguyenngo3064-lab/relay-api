@@ -1,6 +1,3 @@
-// test/resources.test.js
-// Cache limits, Reset RAM behavior, scheduler, and crypto unit tests.
-
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BoundedCache, CacheManager } from '../src/cache/cache.js';
@@ -42,7 +39,6 @@ test('reset ram clears caches but preserves persistent state and cooldowns', () 
   assert.ok(result.cleared.includes('live_metrics'));
   assert.equal(cache.map.size, 0);
   assert.equal(metrics.snapshot().total, 0);
-  // Cooldown preserved so rate-limited creds are not reused prematurely.
   assert.ok(scheduler.snapshot().c1.cooldownRemainingMs > 0);
   assert.ok(cooldownBefore > 0);
   assert.ok(result.preserved.includes('usage_history'));

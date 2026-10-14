@@ -1,11 +1,8 @@
-// HUAN RELAY dashboard client. Talks only to the backend API.
-// No third-party libraries, no emoji, no icon fonts: inline SVG only (CSP-safe).
 (function () {
   'use strict';
   var state = { authed: false, tab: 'overview', csrf: '', lang: 'en', data: {}, masterKeyShown: null };
   var root = document.getElementById('root');
 
-  /* ------------------------------- i18n ------------------------------- */
   var I18N = {
     en: {
       'brand.tag': 'AI API gateway',
@@ -159,7 +156,6 @@
   }
   state.lang = loadLang();
 
-  /* ------------------------------ SVG logos ------------------------------ */
   var LOGO_BRAND = '<svg viewBox="0 0 48 48" fill="none" aria-hidden="true">' +
     '<rect x="2" y="2" width="44" height="44" rx="12" fill="#0d9488"/>' +
     '<path d="M14 30 L22 16 L26 24 L30 18 L34 30" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' +
@@ -175,7 +171,6 @@
     settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3H9.8l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4.4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.06-.4.1-.8.1-1.2 Z"/></svg>',
   };
 
-  /* ------------------------------- Helpers ------------------------------- */
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -217,7 +212,6 @@
     return '<div class="card"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div>' + (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') + '</div>';
   }
 
-  /* ------------------------------- Views ------------------------------- */
   function brandBlock(sub) {
     return '<div class="brand">' + LOGO_BRAND + '<div class="bt"><b>HUAN RELAY</b><span>' + esc(sub || t('brand.tag')) + '</span></div></div>';
   }
@@ -298,7 +292,6 @@
     });
   }
 
-  /* ------------------------------ Charts ------------------------------ */
   function niceMax(v) {
     if (v <= 5) return 5;
     var p = Math.pow(10, Math.floor(Math.log10(v)));
@@ -307,7 +300,6 @@
     return nm * p;
   }
 
-  // Labeled bar chart: value labels above bars, time labels below, y-axis max + gridlines.
   function barChart(ts, title) {
     ts = ts || [];
     var totalReqs = 0, i;
@@ -424,7 +416,6 @@
       '</div>';
   }
 
-  /* ----------------------------- Providers ----------------------------- */
   function viewProviders(d) {
     var ps = d.providers || [];
     var out = '<h1>' + esc(t('pv.title')) + '</h1><p class="lede">' + esc(t('pv.lede')) + '</p>';
@@ -519,7 +510,6 @@
     return out;
   }
 
-  /* ----------------------------- Scoreboard ----------------------------- */
   function viewScoreboard(d) {
     var rows = d.scoreboard || [];
     var out = '<h1>' + esc(t('sb.title')) + '</h1><p class="lede">' + esc(t('sb.lede')) + '</p>';
@@ -546,7 +536,6 @@
     return out;
   }
 
-  /* ------------------------------- Usage ------------------------------- */
   function viewUsage(d) {
     var events = (d.usage && d.usage.events) || [];
     var summary = (d.usage && d.usage.summary) || {};
@@ -588,7 +577,6 @@
     return out;
   }
 
-  /* ------------------------------ Context ------------------------------ */
   function viewContext(d) {
     var cs = (d.settings && d.settings.settings) || d.context || {};
     return '<h1>' + esc(t('ctx.title')) + '</h1><p class="lede">' + esc(t('ctx.lede')) + '</p>' +
@@ -605,7 +593,6 @@
       '</form></div>';
   }
 
-  /* ------------------------------ Settings ------------------------------ */
   function viewSettings(d) {
     var lang = state.lang;
     return '<h1>' + esc(t('st.title')) + '</h1><p class="lede">' + esc(t('st.lede')) + '</p>' +
@@ -621,7 +608,6 @@
       '</form></div>';
   }
 
-  /* ------------------------------- Routing ------------------------------- */
   async function route() {
     var tabs = TABS;
     if (tabs.indexOf(state.tab) === -1) state.tab = 'overview';
@@ -709,7 +695,6 @@
       });
     });
 
-    // Attached prompt inline editor
     root.querySelectorAll('button[data-editprompt]').forEach(function (b) {
       b.addEventListener('click', function () {
         var pid = b.getAttribute('data-editprompt');
@@ -738,7 +723,6 @@
       });
     });
 
-    // Test request: toggle inline form, then run
     root.querySelectorAll('button[data-test]').forEach(function (b) {
       b.addEventListener('click', function () {
         var form = root.querySelector('form[data-testform="' + b.getAttribute('data-test') + '"]');
@@ -770,7 +754,6 @@
       });
     });
 
-    // Master key
     var nm = document.getElementById('newmaster');
     if (nm) nm.addEventListener('click', async function () {
       try { var r = await api('/api/admin/master-key', { method: 'POST', body: {} }); state.masterKeyShown = { rawKey: r.masterKey.rawKey, relayUrl: r.masterKey.relayUrl, prefix: r.masterKey.prefix }; route(); }
@@ -782,7 +765,6 @@
       catch (err) { document.getElementById('masterresult').innerHTML = msg('err', err.message); }
     });
 
-    // Context form
     var cf = document.getElementById('ctxform');
     if (cf) cf.addEventListener('submit', async function (e) {
       e.preventDefault();
@@ -821,7 +803,6 @@
     catch (e) { renderLogin(false, msg('err', t('login.offline'))); return; }
     state.setupRequired = !!(st && st.setupRequired);
     if (!state.authed) return renderLogin(state.setupRequired);
-    // Sync language from the server setting once, after auth.
     try {
       var s = await api('/api/admin/settings');
       if (s && s.ui && s.ui.language && (s.ui.language === 'en' || s.ui.language === 'vi')) {

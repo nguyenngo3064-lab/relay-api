@@ -52,7 +52,6 @@ function normalizeIPv6(host) {
 
 function ipv6ToParts(ip) {
   let h = normalizeIPv6(ip);
-  // IPv4-mapped / translated forms
   if (h.includes('.')) {
     const lastColon = h.lastIndexOf(':');
     const v4 = h.slice(lastColon + 1);
@@ -138,7 +137,6 @@ export async function validateProviderUrl(rawUrl, opts = {}) {
   const proto = parsed.protocol;
   const isDev = (opts.nodeEnv || 'production') !== 'production';
 
-  // Protocol policy
   if (proto === 'http:') {
     if (!allowPrivateNetwork && !isDev) {
       throw new SSRFError(
@@ -172,8 +170,6 @@ export async function validateProviderUrl(rawUrl, opts = {}) {
     return { url: parsed.toString(), resolvedIps: [hostForDns] };
   }
 
-  // Resolve DNS and check every returned address to prevent DNS rebinding to
-  // internal ranges. The caller must also pin the resolved address on connect.
   let addresses;
   try {
     const res = await lookup(hostname, { all: true });

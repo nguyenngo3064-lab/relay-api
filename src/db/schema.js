@@ -125,7 +125,6 @@ export const MIGRATIONS = [
       // that load-balances across every enabled provider credential).
       db.exec(`ALTER TABLE relay_keys ADD COLUMN role TEXT NOT NULL DEFAULT 'client';`);
 
-      // Track which client key issued each request, for the per-key scoreboard.
       db.exec(`ALTER TABLE usage_events ADD COLUMN relay_key_id TEXT;`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_relay_key ON usage_events(relay_key_id);`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_credential ON usage_events(credential_id);`);
@@ -135,7 +134,6 @@ export const MIGRATIONS = [
     id: 3,
     name: 'provider_attached_prompt',
     up(db) {
-      // Admin-defined prompt attached to every relayed request for this provider.
       db.exec(`ALTER TABLE providers ADD COLUMN attached_prompt TEXT;`);
     },
   },
@@ -143,10 +141,6 @@ export const MIGRATIONS = [
     id: 4,
     name: 'persistent_remember_me_sessions',
     up(db) {
-      // "Remember me" sessions: a persistent login that survives browser restarts
-      // for a bounded lifetime (REMEMBER_TTL_DAYS, default 30). Non-persistent
-      // sessions keep the short idle/absolute behavior. Existing rows default to 0
-      // (non-persistent), so current sessions are unaffected by this migration.
       db.exec(`ALTER TABLE sessions ADD COLUMN persistent INTEGER NOT NULL DEFAULT 0;`);
     },
   },

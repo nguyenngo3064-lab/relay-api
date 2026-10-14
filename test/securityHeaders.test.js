@@ -1,9 +1,3 @@
-// test/securityHeaders.test.js
-// Regression tests for HREL-2026-002: security headers (CSP, X-Frame-Options,
-// nosniff, ...) were missing on hijacked streaming (SSE) responses because the
-// streaming path bypasses Fastify's onSend hook. The streaming path must apply
-// the same header set as normal responses.
-
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTestApp, loginAdmin, startMockUpstream } from './helpers.js';

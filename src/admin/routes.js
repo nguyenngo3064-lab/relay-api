@@ -16,7 +16,6 @@ export async function adminRoutes(fastify, opts) {
   const { db, credentialService, relayKeyService, providerService, metrics, cacheManager, scheduler, contextSettings, config, isHttps, logger } = opts;
   const adminPre = { preHandler: fastify.requireAdmin };
 
-  // ---- Overview ----
   fastify.get('/api/admin/overview', adminPre, async () => {
     const snap = metrics.snapshot();
     const dbTotals = usageSummary(db);
@@ -36,7 +35,6 @@ export async function adminRoutes(fastify, opts) {
     };
   });
 
-  // ---- Providers ----
   fastify.get('/api/admin/providers', adminPre, async () => {
     const providers = listProviders(db);
     return {
@@ -185,7 +183,6 @@ export async function adminRoutes(fastify, opts) {
     return { ok: true };
   });
 
-  // ---- Test Request (real upstream call, no fallback) ----
   fastify.post('/api/admin/providers/:providerId/test', adminPre, async (request, reply) => {
     const gate = opts.rateLimiter.check('test:' + request.ip, config.limits.testRatePerMinute, 60_000);
     if (!gate.allowed) {
@@ -248,7 +245,6 @@ export async function adminRoutes(fastify, opts) {
     return { credential: { id: patch.id, label: patch.label, keyHint: patch.keyHint, enabled: patch.enabled, isFallback: patch.isFallback } };
   });
 
-  // ---- Client relay keys (raw key shown once at creation) ----
   fastify.get('/api/admin/keys', adminPre, async () => ({ keys: relayKeyService.list() }));
 
   fastify.post('/api/admin/keys', adminPre, async (request, reply) => {
@@ -314,7 +310,6 @@ export async function adminRoutes(fastify, opts) {
     return { scoreboard: credentialScoreboard(db, since) };
   });
 
-  // ---- Usage & diagnostics ----
   fastify.get('/api/admin/usage', adminPre, async (request) => {
     const limit = request.query.limit ? Number(request.query.limit) : 100;
     const since = request.query.since ? String(request.query.since) : null;
@@ -338,7 +333,6 @@ export async function adminRoutes(fastify, opts) {
     return { events: listDiagnostics(db, { limit }) };
   });
 
-  // ---- Context stats & settings ----
   fastify.get('/api/admin/context/stats', adminPre, async () => ({ settings: contextSettings.snapshot() }));
 
   const SUPPORTED_LANGUAGES = new Set(['en', 'vi']);
@@ -372,7 +366,6 @@ export async function adminRoutes(fastify, opts) {
     return out;
   });
 
-  // ---- Cache / Reset RAM ----
   fastify.post('/api/admin/cache/reset', adminPre, async () => {
     const result = cacheManager.resetRam();
     logger.info('reset ram executed', { cleared: result.cleared });

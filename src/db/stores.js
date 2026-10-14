@@ -7,8 +7,6 @@ function now() {
   return new Date().toISOString();
 }
 
-/* ------------------------------- Admin account ----------------------------- */
-
 export function getAdminAccount(db) {
   const row = db.prepare('SELECT * FROM admin_account WHERE id = 1').get();
   if (!row) return null;
@@ -36,8 +34,6 @@ export function updateAdminPassword(db, passwordRecord) {
     'UPDATE admin_account SET password_record = ?, updated_at = ?, must_change = 0 WHERE id = 1'
   ).run(JSON.stringify(passwordRecord), now());
 }
-
-/* --------------------------------- Providers -------------------------------- */
 
 export function listProviders(db) {
   return db.prepare('SELECT * FROM providers ORDER BY created_at ASC').all().map(mapProvider);
@@ -150,7 +146,6 @@ export function deleteProvider(db, id) {
   return res.changes > 0;
 }
 
-/* -------------------------------- Credentials ------------------------------ */
 // Credentials are stored encrypted. These functions never decrypt.
 
 export function listCredentials(db, providerId = null) {
@@ -222,8 +217,6 @@ export function deleteCredential(db, id) {
   return res.changes > 0;
 }
 
-/* --------------------------------- Relay keys ------------------------------ */
-
 export function listRelayKeys(db) {
   return db.prepare('SELECT * FROM relay_keys ORDER BY created_at ASC').all().map((r) => ({
     id: r.id,
@@ -235,7 +228,6 @@ export function listRelayKeys(db) {
     createdAt: r.created_at,
     revokedAt: r.revoked_at,
     role: r.role || 'client',
-    // salt/hash intentionally omitted from listings
   }));
 }
 
@@ -278,8 +270,6 @@ export function deleteRelayKey(db, id) {
   return res.changes > 0;
 }
 
-/* --------------------------------- Settings -------------------------------- */
-
 export function getSettings(db) {
   const rows = db.prepare('SELECT key, value FROM settings').all();
   const out = {};
@@ -308,8 +298,6 @@ export function setSettings(db, obj) {
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
-
-/* --------------------------------- Sessions -------------------------------- */
 
 export function createSession(db, idHash, ttlMs, { persistent = false } = {}) {
   const ts = now();
@@ -363,8 +351,6 @@ export function deleteSession(db, idHash) {
 export function deleteExpiredSessions(db) {
   db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now());
 }
-
-/* ------------------------------ Usage & logs ------------------------------ */
 
 export function recordUsage(db, e) {
   db.prepare(

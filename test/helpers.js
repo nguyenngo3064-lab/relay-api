@@ -1,7 +1,3 @@
-// test/helpers.js
-// Shared test utilities: in-memory DB, config, mock upstream server, and a
-// helper to build the app and log in. Used by the automated test suite.
-
 import { createServer } from 'node:http';
 import { createDatabase } from '../src/db/index.js';
 import { buildApp } from '../src/app.js';

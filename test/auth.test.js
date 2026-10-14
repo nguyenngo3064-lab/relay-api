@@ -1,6 +1,3 @@
-// test/auth.test.js
-// Authentication and authorization tests.
-
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTestApp, loginAdmin } from './helpers.js';

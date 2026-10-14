@@ -1,14 +1,12 @@
 // test/concurrency.test.js
-// Regression tests for HREL-2026-001: MAX_CONCURRENT_REQUESTS was validated in
-// config but never enforced. A global in-flight limiter must cap concurrent
-// relayed upstream requests and reject the excess with 429 + Retry-After.
+// The global in-flight limiter must cap concurrent relayed upstream requests
+// and reject the excess with 429 + Retry-After.
 
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { buildTestApp, loginAdmin, testConfig } from './helpers.js';
 
-// Slow mock upstream so requests overlap in time (holds slots).
 let slow;
 const DELAY_MS = 250;
 
