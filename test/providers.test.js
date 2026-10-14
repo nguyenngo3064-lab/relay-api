@@ -125,6 +125,7 @@ test('relay streaming emits SSE chunks and terminates with [DONE]', async () => 
   assert.match(res.headers['content-type'], /text\/event-stream/);
   assert.match(res.body, /data: /);
   assert.match(res.body, /\[DONE\]/);
+  assert.doesNotMatch(String(res.body), /"error"/);
 });
 
 test('relay normalizes provider errors without leaking secrets', async () => {

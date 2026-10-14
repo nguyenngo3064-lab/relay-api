@@ -4,6 +4,7 @@ import { withAttachedPrompt } from './normalize.js';
 import { classifyError, statusToCode, redactText, endpointUrlFor } from '../providers/providerService.js';
 import { parseRetryAfterMs, openUpstreamStream } from '../providers/forward.js';
 import { createSSEParser } from './sse.js';
+import { sseDone } from './streamService.js';
 import { processContext } from '../context/engine.js';
 import { listProviders, listCredentials, recordUsage, recordDiagnostic } from '../db/stores.js';
 import { selectFallback } from '../scheduler/scheduler.js';

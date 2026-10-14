@@ -144,6 +144,8 @@ test('master key streaming works without a model name', async () => {
   const text = res.body || res.payload;
   assert.match(String(text), /data:/);
   assert.match(String(text), /\[DONE\]/);
+  // Regression: the stream must not emit an error frame after the payload.
+  assert.doesNotMatch(String(text), /"error"/);
 });
 
 test('malformed JSON body returns a clean 400 (not a raw Fastify FST_ERR)', async () => {
