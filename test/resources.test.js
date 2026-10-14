@@ -76,11 +76,11 @@ test('scheduler honors retry-after cooldown', () => {
   assert.equal(gate.reason, 'cooldown');
 });
 
-test('password hashing and verification', () => {
-  const rec = hashPassword('a-strong-password-123');
+test('password hashing and verification', async () => {
+  const rec = await hashPassword('a-strong-password-123');
   assert.equal(rec.algorithm, 'argon2id');
-  assert.equal(verifyPassword('a-strong-password-123', rec), true);
-  assert.equal(verifyPassword('wrong', rec), false);
+  assert.equal(await verifyPassword('a-strong-password-123', rec), true);
+  assert.equal(await verifyPassword('wrong', rec), false);
 });
 
 test('credential encryption round-trips and fails on tamper', () => {

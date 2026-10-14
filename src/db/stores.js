@@ -325,6 +325,34 @@ export function touchSession(db, idHash) {
   db.prepare('UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?').run(now(), idHash);
 }
 
+export function refreshSessionExpiry(db, idHash, ttlMs) {
+  const expires = new Date(Date.now() + ttlMs).toISOString();
+  db.prepare('UPDATE sessions SET expires_at = ?, last_seen_at = ? WHERE id_hash = ?').run(expires, now(), idHash);
+  return expires;
+}
+
+export function deleteAllSessions(db) {
+  db.prepare('DELETE FROM sessions').run();
+}
+
+export function pruneOldEvents(db, retentionDays) {
+  const days = Math.max(1, Math.min(365, Number(retentionDays) || 30));
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const u = db.prepare('DELETE FROM usage_events WHERE created_at < ?').run(cutoff);
+  const d = db.prepare('DELETE FROM diagnostics WHERE created_at < ?').run(cutoff);
+  return { cutoff, usageDeleted: u.changes || 0, diagnosticsDeleted: d.changes || 0 };
+}
+
+export function rotateRelayKeyAtomic(db, oldId, rec) {
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE relay_keys SET revoked_at = ? WHERE id = ?').run(now(), oldId);
+    const created = createRelayKey(db, rec);
+    db.exec('COMMIT');
+    return created;
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+}
+
 export function deleteSession(db, idHash) {
   db.prepare('DELETE FROM sessions WHERE id_hash = ?').run(idHash);
 }

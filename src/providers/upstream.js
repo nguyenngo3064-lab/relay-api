@@ -152,7 +152,7 @@ function finishNonStream(res, buf, started, maxResponseBytes) {
 
 function safeHeaders(headers) {
   const out = {};
-  const allow = new Set(['content-type', 'x-request-id', 'request-id', 'openai-processing-ms']);
+  const allow = new Set(['content-type', 'x-request-id', 'request-id', 'openai-processing-ms', 'retry-after']);
   for (const [k, v] of headers.entries()) {
     if (allow.has(k.toLowerCase())) out[k.toLowerCase()] = v;
   }

@@ -13,6 +13,7 @@ import {
   revokeRelayKey,
   setRelayKeyEnabled,
   touchRelayKeyUsed,
+  rotateRelayKeyAtomic,
 } from '../db/stores.js';
 
 export function createRelayKeyService(db, pepper) {
@@ -34,12 +35,17 @@ export function createRelayKeyService(db, pepper) {
     return { id: rec.id, rawKey: raw, name: rec.name, prefix: rec.prefix, role: rec.role };
   }
 
-  /** Rotate: revoke old, issue new. Returns new raw key once. */
   function rotate(id) {
     const existing = getRelayKey(db, id);
     if (!existing) return null;
-    revokeRelayKey(db, id);
-    return create({ name: existing.name, rateLimitRpm: existing.rateLimitRpm, role: existing.role });
+    const raw = generateRelayKey();
+    const { salt, hash } = hashRelayKey(raw, pepper);
+    const prefix = raw.slice(0, 12);
+    const rec = rotateRelayKeyAtomic(db, id, {
+      id: randomUUID(), name: existing.name, salt, hash, prefix,
+      enabled: true, rateLimitRpm: existing.rateLimitRpm, role: existing.role || 'client',
+    });
+    return { id: rec.id, rawKey: raw, name: rec.name, prefix: rec.prefix, role: rec.role };
   }
 
   /**
@@ -61,10 +67,10 @@ export function createRelayKeyService(db, pepper) {
    */
   function authenticate(rawKey) {
     if (!rawKey || typeof rawKey !== 'string') return null;
-    // Only consider enabled, non-revoked keys.
+    const prefix = rawKey.slice(0, 12);
     const candidates = db
-      .prepare('SELECT * FROM relay_keys WHERE enabled = 1 AND revoked_at IS NULL')
-      .all();
+      .prepare('SELECT * FROM relay_keys WHERE enabled = 1 AND revoked_at IS NULL AND prefix = ?')
+      .all(prefix);
     for (const row of candidates) {
       if (verifyRelayKey(rawKey, { salt: row.salt, hash: row.hash }, pepper)) {
         touchRelayKeyUsed(db, row.id);

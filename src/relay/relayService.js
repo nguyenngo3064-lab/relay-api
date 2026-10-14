@@ -2,11 +2,10 @@
 // Client-facing relay (non-streaming). Resolves model -> provider/credential,
 // applies context processing, forwards, and normalizes the response/errors.
 
-import { getAdapter, parseOpenAIUsage, parseOpenAIChoice } from '../providers/adapter.js';
-import { requestJson, extractRequestId, UpstreamError } from '../providers/upstream.js';
-import { classifyError, redactText, endpointUrlFor } from '../providers/providerService.js';
+import { forwardOnce, mapErrorStatus } from './forwardOnce.js';
+import { classifyError, redactText } from '../providers/providerService.js';
 import { processContext } from '../context/engine.js';
-import { listProviders, getProvider, listCredentials, recordUsage, recordDiagnostic } from '../db/stores.js';
+import { listProviders, listCredentials, recordUsage, recordDiagnostic } from '../db/stores.js';
 import { selectFallback } from '../scheduler/scheduler.js';
 
 export function findProviderForModel(db, model) {
@@ -30,52 +29,6 @@ export function modelUnavailableMessage(db, model) {
   const base = 'No enabled provider is configured for model "' + model + '".';
   if (!models.length) return base + ' No enabled provider has any model configured — add at least one model to a provider.';
   return base + ' Available models: ' + models.join(', ') + '.';
-}
-
-function mapErrorStatus(code) {
-  switch (code) {
-    case 'MODEL_UNAVAILABLE':
-    case 'MODEL_NOT_FOUND': return 404;
-    case 'AUTHENTICATION_FAILURE':
-    case 'AUTHORIZATION_FAILURE': return 502;
-    case 'RATE_LIMITED':
-    case 'QUOTA_EXHAUSTED': return 429;
-    case 'TIMEOUT': return 504;
-    case 'INVALID_CONFIGURATION': return 500;
-    default: return 502;
-  }
-}
-
-async function forwardOnce({ provider, cred, forwarded, credentialService }) {
-  const adapter = getAdapter(provider.apiFormat);
-  const apiKey = credentialService.reveal(cred);
-  const headers = adapter.authHeader(provider.authStyle, apiKey);
-  const body = adapter.buildRequest(forwarded, provider);
-  const url = endpointUrlFor(provider, adapter.endpointPath);
-  const startedMono = process.hrtime.bigint();
-  const res = await requestJson({ url, method: 'POST', headers, body, timeoutMs: provider.requestTimeoutMs, connectTimeoutMs: provider.connectTimeoutMs, allowPrivateNetwork: provider.allowPrivateNetwork });
-  const latencyMs = Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6);
-  if (res.httpStatus >= 400) {
-    const ue = new UpstreamError('Provider error', 'HTTP_' + res.httpStatus, { httpStatus: res.httpStatus });
-    ue.providerBody = res.json;
-    throw ue;
-  }
-  const { usage } = parseOpenAIUsage(res.json);
-  const { text, toolCalls, finishReason } = parseOpenAIChoice(res.json);
-  return {
-    httpStatus: res.httpStatus,
-    requestId: extractRequestId(res.headers, res.json),
-    latencyMs,
-    usage: usage || { source: 'unavailable' },
-    completion: {
-      id: res.json && res.json.id ? res.json.id : 'chatcmpl-relay',
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: forwarded.model,
-      choices: [{ index: 0, message: Object.assign({ role: 'assistant', content: text }, toolCalls ? { tool_calls: toolCalls } : {}), finish_reason: finishReason }],
-      usage: usage ? { prompt_tokens: usage.promptTokens, completion_tokens: usage.completionTokens, total_tokens: usage.totalTokens } : undefined,
-    },
-  };
 }
 
 /**
@@ -118,7 +71,7 @@ export async function executeRelay({ db, credentialService, scheduler, contextSe
       return Object.assign({}, result, { contextMetrics: processed.metrics, usedFallback });
     } catch (err) {
       const code = classifyError(err);
-      const retryAfterMs = err.httpStatus === 429 ? 2000 : null;
+      const retryAfterMs = err.retryAfterMs != null ? err.retryAfterMs : (err.httpStatus === 429 ? 2000 : null);
       scheduler.recordFailure(cred.id, { retryAfterMs });
       lastError = { code, message: redactText(err.message), httpStatus: err.httpStatus != null ? err.httpStatus : null };
       // Ambiguous failures (timeout/5xx) must not be replayed to another key.

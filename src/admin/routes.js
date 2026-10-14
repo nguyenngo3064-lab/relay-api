@@ -4,12 +4,11 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  listProviders, getProvider, createProvider, updateProvider, deleteProvider,
+  listProviders, getProvider, getCredential, createProvider, updateProvider, deleteProvider,
   listCredentials, deleteCredential, updateCredential,
   listRelayKeys, deleteRelayKey, setRelayKeyEnabled, getMasterRelayKey,
   getSettings, setSettings, listUsage, usageSummary, listDiagnostics, credentialScoreboard,
 } from '../db/stores.js';
-import { createCredentialService } from '../providers/credentialService.js';
 import { MODES, DEFAULT_SETTINGS } from '../context/engine.js';
 
 export async function adminRoutes(fastify, opts) {
@@ -48,42 +47,91 @@ export async function adminRoutes(fastify, opts) {
     };
   });
 
+  function bad(msg) { return { error: { code: 'INVALID_REQUEST', message: msg } }; }
+  function numOrNull(v, { min, max }) {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < min || n > max) return { bad: true };
+    return { value: Math.floor(n) };
+  }
+  function validateProviderInput(body, isPatch = false) {
+    const out = {};
+    if (!isPatch || body.name !== undefined) {
+      if (typeof body.name !== 'string' || !body.name.trim()) return { error: bad('name is required.') };
+      out.name = body.name.trim().slice(0, 120);
+    }
+    if (!isPatch || body.baseUrl !== undefined) {
+      if (typeof body.baseUrl !== 'string' || !body.baseUrl.trim()) return { error: bad('baseUrl is required.') };
+      let u;
+      try { u = new URL(body.baseUrl.trim()); } catch { return { error: bad('baseUrl must be an absolute http(s) URL.') }; }
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: bad('baseUrl must be an absolute http(s) URL.') };
+      out.baseUrl = u.toString().replace(/\/+$/, '');
+    }
+    if (body.apiFormat !== undefined) {
+      if (body.apiFormat !== 'openai_chat_completions') return { error: bad('apiFormat must be openai_chat_completions.') };
+      out.apiFormat = body.apiFormat;
+    }
+    if (body.authStyle !== undefined) {
+      if (!['bearer', 'x-api-key', 'raw'].includes(body.authStyle)) return { error: bad('authStyle must be bearer, x-api-key, or raw.') };
+      out.authStyle = body.authStyle;
+    }
+    if (body.models !== undefined) {
+      if (!Array.isArray(body.models) || body.models.length > 100) return { error: bad('models must be an array (max 100).') };
+      const models = [];
+      for (const m of body.models) {
+        if (typeof m !== 'string' || !m.trim() || m.length > 200) return { error: bad('each model must be a non-empty string (max 200).') };
+        models.push(m.trim());
+      }
+      out.models = [...new Set(models)];
+    }
+    if (body.enabled !== undefined) out.enabled = body.enabled !== false;
+    if (body.capabilities !== undefined) {
+      if (!body.capabilities || typeof body.capabilities !== 'object') return { error: bad('capabilities must be an object.') };
+      out.capabilities = body.capabilities;
+    }
+    const intFields = [
+      ['requestTimeoutMs', 100, 300000], ['connectTimeoutMs', 100, 60000],
+      ['maxOutputTokens', 1, 1000000], ['rateLimitRpm', 1, 100000],
+      ['minIntervalMs', 0, 3600000], ['maxConcurrency', 1, 128],
+    ];
+    for (const [k, min, max] of intFields) {
+      if (body[k] !== undefined && body[k] !== null && body[k] !== '') {
+        const r = numOrNull(body[k], { min, max });
+        if (r && r.bad) return { error: bad(k + ' must be between ' + min + ' and ' + max + '.') };
+        out[k] = r.value;
+      } else if (body[k] !== undefined) out[k] = null;
+    }
+    if (body.allowPrivateNetwork !== undefined) out.allowPrivateNetwork = !!body.allowPrivateNetwork;
+    return { value: out };
+  }
   fastify.post('/api/admin/providers', adminPre, async (request, reply) => {
     const body = request.body || {};
-    if (!body.name || !body.baseUrl) {
-      return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: 'name and baseUrl are required.' } });
+    const v = validateProviderInput(body);
+    if (v.error) return reply.code(400).send(v.error);
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+    if (apiKey && !credentialService.configured) {
+      return reply.code(400).send({ error: { code: 'ENCRYPTION_NOT_CONFIGURED', message: 'RELAY_ENCRYPTION_KEY is not configured. Refusing to store credentials.' } });
     }
     const provider = createProvider(db, {
       id: randomUUID(),
-      name: String(body.name).slice(0, 120),
-      type: 'custom',
-      baseUrl: String(body.baseUrl),
-      apiFormat: body.apiFormat || 'openai_chat_completions',
-      authStyle: body.authStyle || 'bearer',
-      enabled: body.enabled !== false,
-      models: Array.isArray(body.models) ? body.models : [],
-      capabilities: body.capabilities || {},
-      requestTimeoutMs: Number(body.requestTimeoutMs) || 60000,
-      connectTimeoutMs: Number(body.connectTimeoutMs) || 10000,
-      maxOutputTokens: body.maxOutputTokens != null ? Number(body.maxOutputTokens) : null,
-      rateLimitRpm: body.rateLimitRpm != null ? Number(body.rateLimitRpm) : null,
-      minIntervalMs: Number(body.minIntervalMs) || 0,
-      maxConcurrency: Number(body.maxConcurrency) || 1,
-      allowPrivateNetwork: !!body.allowPrivateNetwork,
+      name: v.value.name, type: 'custom', baseUrl: v.value.baseUrl,
+      apiFormat: v.value.apiFormat || 'openai_chat_completions',
+      authStyle: v.value.authStyle || 'bearer',
+      enabled: v.value.enabled !== undefined ? v.value.enabled : true,
+      models: v.value.models || [], capabilities: v.value.capabilities || {},
+      requestTimeoutMs: v.value.requestTimeoutMs ?? 60000,
+      connectTimeoutMs: v.value.connectTimeoutMs ?? 10000,
+      maxOutputTokens: v.value.maxOutputTokens ?? null,
+      rateLimitRpm: v.value.rateLimitRpm ?? null,
+      minIntervalMs: v.value.minIntervalMs ?? 0,
+      maxConcurrency: v.value.maxConcurrency ?? 1,
+      allowPrivateNetwork: !!v.value.allowPrivateNetwork,
     });
-
-    // Optional inline API key: store the first credential together with the
-    // provider so setup is a single step (URL + model + key).
     let credential = null;
     let masterKey = null;
-    const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
     if (apiKey) {
-      if (!credentialService.configured) {
-        return reply.code(400).send({ error: { code: 'ENCRYPTION_NOT_CONFIGURED', message: 'RELAY_ENCRYPTION_KEY is not configured. Refusing to store credentials.' } });
-      }
       credential = credentialService.store(provider.id, 'primary', apiKey, { isFallback: false });
       logger.info('provider credential stored', { providerId: provider.id, credentialId: credential.id });
-      // After the very first provider key, ensure the gateway/master key exists.
       masterKey = ensureMasterKey();
     }
     return { provider, credential: credential ? { id: credential.id, label: credential.label, keyHint: credential.keyHint } : null, masterKey };
@@ -109,21 +157,16 @@ export async function adminRoutes(fastify, opts) {
   }
 
   function gatewayUrl() {
+    if (config.publicUrl) return config.publicUrl + '/v1/chat/completions';
     const scheme = isHttps ? 'https' : 'http';
-    const host = config.host === '0.0.0.0' ? '127.0.0.1' : config.host;
+    const host = (config.host === '0.0.0.0' || config.host === '::') ? '127.0.0.1' : config.host;
     return `${scheme}://${host}:${config.port}/v1/chat/completions`;
   }
 
   fastify.patch('/api/admin/providers/:providerId', adminPre, async (request, reply) => {
-    const patch = request.body || {};
-    const provider = updateProvider(db, request.params.providerId, {
-      name: patch.name, baseUrl: patch.baseUrl, apiFormat: patch.apiFormat, authStyle: patch.authStyle,
-      enabled: patch.enabled, models: patch.models, capabilities: patch.capabilities,
-      requestTimeoutMs: patch.requestTimeoutMs, connectTimeoutMs: patch.connectTimeoutMs,
-      maxOutputTokens: patch.maxOutputTokens, rateLimitRpm: patch.rateLimitRpm,
-      minIntervalMs: patch.minIntervalMs, maxConcurrency: patch.maxConcurrency,
-      allowPrivateNetwork: patch.allowPrivateNetwork,
-    });
+    const v = validateProviderInput(request.body || {}, true);
+    if (v.error) return reply.code(400).send(v.error);
+    const provider = updateProvider(db, request.params.providerId, v.value);
     if (!provider) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Provider not found.' } });
     return { provider };
   });
@@ -174,12 +217,16 @@ export async function adminRoutes(fastify, opts) {
   });
 
   fastify.delete('/api/admin/providers/:providerId/credentials/:credentialId', adminPre, async (request, reply) => {
+    const cred = getCredential(db, request.params.credentialId);
+    if (!cred || cred.providerId !== request.params.providerId) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Credential not found.' } });
     const ok = deleteCredential(db, request.params.credentialId);
     if (!ok) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Credential not found.' } });
     return { ok: true };
   });
 
   fastify.patch('/api/admin/providers/:providerId/credentials/:credentialId', adminPre, async (request, reply) => {
+    const existing = getCredential(db, request.params.credentialId);
+    if (!existing || existing.providerId !== request.params.providerId) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Credential not found.' } });
     const { enabled, isFallback, apiKey, label } = request.body || {};
     let patch = { enabled, isFallback, label };
     if (typeof apiKey === 'string' && apiKey.trim()) {
@@ -212,8 +259,8 @@ export async function adminRoutes(fastify, opts) {
 
   fastify.patch('/api/admin/keys/:keyId', adminPre, async (request, reply) => {
     const { enabled } = request.body || {};
-    if (enabled !== undefined) relayKeyService.setEnabled(request.params.keyId, !!enabled);
-    else relayKeyService.revoke(request.params.keyId);
+    if (typeof enabled !== 'boolean') return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: 'enabled (boolean) is required.' } });
+    relayKeyService.setEnabled(request.params.keyId, enabled);
     return { ok: true };
   });
 

@@ -1,13 +1,8 @@
-// src/relay/gateway.js
-// Gateway routing for the master key. When a client authenticates with the
-// master/gateway relay key, the requested `model` field is ignored and the
-// request is load-balanced (round-robin) across every enabled provider
-// credential. This lets a client use a single URL + single API key without
-// knowing any model names.
-
 import { getAdapter } from '../providers/adapter.js';
-import { requestJson, extractRequestId, UpstreamError } from '../providers/upstream.js';
-import { classifyError, redactText, endpointUrlFor } from '../providers/providerService.js';
+import { forwardOnce, mapErrorStatus } from './forwardOnce.js';
+import { classifyError, statusToCode, redactText, endpointUrlFor } from '../providers/providerService.js';
+import { parseRetryAfterMs, openUpstreamStream } from '../providers/forward.js';
+import { createSSEParser } from './sse.js';
 import { processContext } from '../context/engine.js';
 import { listProviders, listCredentials, recordUsage, recordDiagnostic } from '../db/stores.js';
 import { selectFallback } from '../scheduler/scheduler.js';
@@ -46,56 +41,10 @@ export function orderRoundRobin(pool) {
   return pool.slice(start).concat(pool.slice(0, start));
 }
 
-function mapErrorStatus(code) {
-  switch (code) {
-    case 'MODEL_UNAVAILABLE':
-    case 'MODEL_NOT_FOUND': return 404;
-    case 'AUTHENTICATION_FAILURE':
-    case 'AUTHORIZATION_FAILURE': return 502;
-    case 'RATE_LIMITED':
-    case 'QUOTA_EXHAUSTED': return 429;
-    case 'TIMEOUT': return 504;
-    case 'INVALID_CONFIGURATION': return 500;
-    default: return 502;
-  }
-}
-
 function sseErr(reply, code, message) {
   reply.raw.write('data: ' + JSON.stringify({ error: { code, message: redactText(message) } }) + '\n\n');
   reply.raw.write('data: [DONE]\n\n');
   reply.raw.end();
-}
-
-async function forwardOnce({ provider, cred, forwarded, credentialService }) {
-  const adapter = getAdapter(provider.apiFormat);
-  const apiKey = credentialService.reveal(cred);
-  const headers = adapter.authHeader(provider.authStyle, apiKey);
-  const body = adapter.buildRequest(forwarded, provider);
-  const url = endpointUrlFor(provider, adapter.endpointPath);
-  const startedMono = process.hrtime.bigint();
-  const res = await requestJson({ url, method: 'POST', headers, body, timeoutMs: provider.requestTimeoutMs, connectTimeoutMs: provider.connectTimeoutMs, allowPrivateNetwork: provider.allowPrivateNetwork });
-  const latencyMs = Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6);
-  if (res.httpStatus >= 400) {
-    const ue = new UpstreamError('Provider error', 'HTTP_' + res.httpStatus, { httpStatus: res.httpStatus });
-    ue.providerBody = res.json;
-    throw ue;
-  }
-  const { usage } = adapter.parseUsage(res.json);
-  const { text, toolCalls, finishReason } = adapter.parseChoice(res.json);
-  return {
-    httpStatus: res.httpStatus,
-    requestId: extractRequestId(res.headers, res.json),
-    latencyMs,
-    usage: usage || { source: 'unavailable' },
-    completion: {
-      id: res.json && res.json.id ? res.json.id : 'chatcmpl-relay',
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: forwarded.model,
-      choices: [{ index: 0, message: Object.assign({ role: 'assistant', content: text }, toolCalls ? { tool_calls: toolCalls } : {}), finish_reason: finishReason }],
-      usage: usage ? { prompt_tokens: usage.promptTokens, completion_tokens: usage.completionTokens, total_tokens: usage.totalTokens } : undefined,
-    },
-  };
 }
 
 /**
@@ -133,7 +82,7 @@ export async function executeGateway({ db, credentialService, scheduler, context
       return Object.assign({}, result, { contextMetrics: processed.metrics, usedFallback });
     } catch (err) {
       const code = classifyError(err);
-      const retryAfterMs = err.httpStatus === 429 ? 2000 : null;
+      const retryAfterMs = err.retryAfterMs != null ? err.retryAfterMs : (err.httpStatus === 429 ? 2000 : null);
       scheduler.recordFailure(entry.cred.id, { retryAfterMs });
       lastError = { code, message: redactText(err.message), httpStatus: err.httpStatus != null ? err.httpStatus : null };
       if (code === 'TIMEOUT' || code === 'PROVIDER_SERVER_ERROR') break;
@@ -174,8 +123,8 @@ export async function executeStreamGateway({ db, credentialService, scheduler, c
 
   const adapter = getAdapter(provider.apiFormat);
   const apiKey = credentialService.reveal(cred);
-  const headers = adapter.authHeader(provider.authStyle, apiKey);
-  const body = adapter.buildRequest(forwarded, provider);
+  const reqHeaders = adapter.authHeader(provider.authStyle, apiKey);
+  const reqBody = adapter.buildRequest({ ...forwarded, stream_options: { include_usage: true } }, provider);
   const url = endpointUrlFor(provider, adapter.endpointPath);
 
   const startedMono = process.hrtime.bigint();
@@ -185,42 +134,45 @@ export async function executeStreamGateway({ db, credentialService, scheduler, c
   reply.raw.on('close', onClose);
 
   try {
-    const res = await fetch(url, { method: 'POST', headers: Object.assign({ accept: 'text/event-stream', 'content-type': 'application/json' }, headers), body: JSON.stringify(body), redirect: 'manual', signal: controller.signal });
-    if (res.status >= 400) {
-      const code = res.status === 429 ? 'RATE_LIMITED' : 'PROVIDER_ERROR';
-      sseErr(reply, code, 'Provider responded with HTTP ' + res.status + '.');
-      recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, relayKeyId, model, status: res.status === 429 ? 'rate_limited' : 'error', httpStatus: res.status, errorCode: code, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+    const incoming = await openUpstreamStream({ url, method: 'POST', headers: { accept: 'text/event-stream', 'content-type': 'application/json', ...reqHeaders }, bodyText: JSON.stringify(reqBody), timeoutMs: provider.requestTimeoutMs, connectTimeoutMs: provider.connectTimeoutMs, allowPrivateNetwork: provider.allowPrivateNetwork, signal: controller.signal });
+    const status = incoming.status || 200;
+    if (status >= 300 && status < 400) {
+      sseErr(reply, 'INVALID_RESPONSE', 'Provider attempted a redirect; not followed.');
+      recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, relayKeyId, model, status: 'error', httpStatus: status, errorCode: 'INVALID_RESPONSE', latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+      try { incoming.body && incoming.body.cancel && await incoming.body.cancel(); } catch {}
       return;
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    for (;;) {
-      const r = await reader.read();
-      if (r.done) break;
-      buffer += decoder.decode(r.value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const rawEvent = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        const line = rawEvent.split('\n').find((l) => l.startsWith('data:'));
-        if (!line) continue;
-        const data = line.slice(5).trim();
-        if (data === '[DONE]') {
-          reply.raw.write('data: ' + JSON.stringify({ done: true }) + '\n\n');
-          reply.raw.write('data: [DONE]\n\n');
-          reply.raw.end();
-          recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, relayKeyId, model, status: 'success', httpStatus: res.status, tokenSource: 'provider', contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
-          scheduler.recordSuccess(cred.id);
-          return;
-        }
-        try { reply.raw.write('data: ' + data + '\n\n'); } catch (e) { /* ignore malformed chunk */ }
-      }
+    if (status >= 400) {
+      const code = statusToCode(status) || 'PROVIDER_ERROR';
+      sseErr(reply, code, 'Provider responded with HTTP ' + status + '.');
+      try { incoming.body && incoming.body.cancel && await incoming.body.cancel(); } catch {}
+      const rams = parseRetryAfterMs(incoming.headers ? incoming.headers.get('retry-after') : null);
+      scheduler.recordFailure(cred.id, rams != null ? { retryAfterMs: rams } : {});
+      recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, relayKeyId, model, status: status === 429 ? 'rate_limited' : 'error', httpStatus: status, errorCode: code, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+      return;
     }
-    reply.raw.write('data: [DONE]\n\n');
-    reply.raw.end();
+    const parser = createSSEParser();
+    const reader = incoming.body ? incoming.body.getReader() : null;
+    const decoder = new TextDecoder();
+    if (!reader) {
+      sseDone(reply);
+    } else {
+      let doneSeen = false;
+      for (;;) {
+        const r = await reader.read();
+        if (r.done) break;
+        const events = parser.push(decoder.decode(r.value, { stream: true }));
+        for (const ev of events) {
+          if (ev.done) { doneSeen = true; break; }
+          try { reply.raw.write('data: ' + ev.data + '\n\n'); } catch {}
+        }
+        if (doneSeen) break;
+      }
+      try { reader.cancel && reader.cancel(); } catch {}
+    }
     scheduler.recordSuccess(cred.id);
-    recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, relayKeyId, model, status: 'success', httpStatus: res.status, contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+    recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, relayKeyId, model, status: 'success', httpStatus: status, contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+    sseDone(reply);
   } catch (err) {
     const code = classifyError(err);
     if (String(err.message).includes('client_disconnect')) {

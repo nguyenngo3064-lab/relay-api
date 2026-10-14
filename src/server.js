@@ -2,7 +2,7 @@
 // Application entry point. Loads config, builds the app, and listens.
 
 import { buildApp } from './app.js';
-import { loadConfig, generateHexSecret } from './config.js';
+import { loadConfig } from './config.js';
 import { createLogger } from './observability/logger.js';
 
 async function main() {
@@ -24,17 +24,31 @@ async function main() {
   const logger = createLogger({ level: config.isProd ? 'info' : 'debug' });
   const app = await buildApp({ config, logger });
 
-  // Graceful shutdown.
+  let shuttingDown = false;
   const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info('shutting down', { signal });
+    const force = setTimeout(() => process.exit(1), 10000);
+    if (force.unref) force.unref();
     try {
       await app.close();
+      try {
+        const db = app._internal && app._internal.db;
+        if (db) {
+          try { db.exec('PRAGMA wal_checkpoint(TRUNCATE);'); } catch {}
+          try { db.close(); } catch {}
+        }
+      } catch {}
     } finally {
+      clearTimeout(force);
       process.exit(0);
     }
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('unhandledRejection', (err) => { logger.error('unhandled rejection', { message: String(err && err.message || err) }); });
+  process.on('uncaughtException', (err) => { logger.error('uncaught exception', { message: String(err && err.message || err) }); shutdown('EXCEPTION'); });
 
   try {
     await app.listen({ host: config.host, port: config.port });

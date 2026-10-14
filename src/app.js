@@ -5,7 +5,7 @@
 import Fastify from 'fastify';
 import { loadConfig } from './config.js';
 import { createDatabase } from './db/index.js';
-import { hasAdminAccount, getSetting, createAdminAccount } from './db/stores.js';
+import { hasAdminAccount, getSetting, createAdminAccount, pruneOldEvents } from './db/stores.js';
 import { createLogger } from './observability/logger.js';
 import { RateLimiter } from './security/rateLimit.js';
 import { registerSecurityHeaders } from './security/headers.js';
@@ -53,7 +53,7 @@ export async function buildApp(overrides = {}) {
         logger.error('ADMIN_PASSWORD_HASH is not valid JSON; ignoring bootstrap hash.');
       }
     } else if (config.bootstrapPassword) {
-      createAdminAccount(db, hashPassword(config.bootstrapPassword), { mustChange: false });
+      createAdminAccount(db, await hashPassword(config.bootstrapPassword), { mustChange: true });
       logger.warn(
         'admin account bootstrapped from ADMIN_BOOTSTRAP_PASSWORD. Change the password after first login and remove the variable.'
       );
@@ -185,6 +185,15 @@ export async function buildApp(overrides = {}) {
     return reply.type('text/html; charset=utf-8').send(DASHBOARD_HTML);
   });
 
+  const retentionDays = config.limits.retentionDays;
+  const cleanupTimer = setInterval(() => {
+    try {
+      sessionService.cleanup();
+      pruneOldEvents(db, retentionDays);
+    } catch {}
+  }, 60 * 60 * 1000);
+  if (cleanupTimer.unref) cleanupTimer.unref();
+  app.addHook('onClose', async () => { clearInterval(cleanupTimer); });
   app.decorate('_internal', { db, config, metrics, cacheManager, scheduler, rateLimiter, sessionService, contextSettings, logger });
 
   return app;

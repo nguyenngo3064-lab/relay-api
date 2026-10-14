@@ -17,6 +17,10 @@ export class Scheduler {
   _get(id) {
     let s = this.state.get(id);
     if (!s) {
+      if (this.state.size >= this.maxTracked) {
+        const oldest = this.state.keys().next().value;
+        this.state.delete(oldest);
+      }
       s = {
         windowStart: Date.now(),
         windowCount: 0,

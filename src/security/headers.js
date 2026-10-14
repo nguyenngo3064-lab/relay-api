@@ -43,6 +43,11 @@ export function registerSecurityHeaders(fastify, { isHttps = false } = {}) {
     if (isHttps) {
       reply.header('strict-transport-security', 'max-age=15552000; includeSubDomains');
     }
+    const url = request.url || '';
+    if (url.startsWith('/api/admin/') || url.startsWith('/api/auth/')) {
+      reply.header('cache-control', 'no-store');
+      reply.header('pragma', 'no-cache');
+    }
     return payload;
   });
 }

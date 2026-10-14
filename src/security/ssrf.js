@@ -42,16 +42,65 @@ function isPrivateIPv4(ip) {
   );
 }
 
+function normalizeIPv6(host) {
+  let h = host.toLowerCase();
+  if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
+  const zone = h.indexOf('%');
+  if (zone !== -1) h = h.slice(0, zone);
+  return h;
+}
+
+function ipv6ToParts(ip) {
+  let h = normalizeIPv6(ip);
+  // IPv4-mapped / translated forms
+  if (h.includes('.')) {
+    const lastColon = h.lastIndexOf(':');
+    const v4 = h.slice(lastColon + 1);
+    if (isPrivateIPv4(v4)) return { mappedV4Blocked: true };
+    h = h.slice(0, lastColon) + ':0:0';
+  }
+  if (h.includes('::')) {
+    const [head, tail] = h.split('::');
+    const hg = head ? head.split(':').filter(Boolean) : [];
+    const tg = tail ? tail.split(':').filter(Boolean) : [];
+    const missing = 8 - (hg.length + tg.length);
+    if (missing < 0) return null;
+    h = [...hg, ...Array(missing).fill('0'), ...tg].join(':');
+  }
+  const parts = h.split(':');
+  if (parts.length !== 8) return null;
+  const nums = [];
+  for (const g of parts) {
+    if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+    nums.push(parseInt(g, 16));
+  }
+  return { groups: nums };
+}
+
 function isPrivateIPv6(ip) {
-  const lower = ip.toLowerCase();
-  if (lower === '::' || lower === '::1') return true; // unspecified / loopback
-  if (lower.startsWith('fe80')) return true; // link-local
-  if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique local
-  if (lower.startsWith('ff')) return true; // multicast
-  if (lower.startsWith('::ffff:')) {
-    // IPv4-mapped IPv6
-    const v4 = lower.replace('::ffff:', '');
+  const raw = normalizeIPv6(ip);
+  if (raw === '::' || raw === '::1') return true;
+  const parsed = ipv6ToParts(raw);
+  if (parsed && parsed.mappedV4Blocked) return true;
+  if (!parsed) return true;
+  const g = parsed.groups;
+  const first = g[0];
+  if ((first & 0xffc0) === 0xfe80) return true;
+  if ((first & 0xfe00) === 0xfc00) return true;
+  if ((first & 0xff00) === 0xff00) return true;
+  if (g[0] === 0x2002) {
+    const v4 = ((g[1] >> 8) & 255) + '.' + (g[1] & 255) + '.' + ((g[2] >> 8) & 255) + '.' + (g[2] & 255);
+    if (isPrivateIPv4(v4)) return true;
+  }
+  if (g[0] === 0x64 && g[1] === 0xff9b) return true;
+  if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0xffff) {
+    const v4 = ((g[6] >> 8) & 255) + '.' + (g[6] & 255) + '.' + ((g[7] >> 8) & 255) + '.' + (g[7] & 255);
+    if (isPrivateIPv4(v4)) return true;
+  }
+  if (raw.startsWith('::ffff:')) {
+    const v4 = raw.replace('::ffff:', '');
     if (v4.includes('.')) return isPrivateIPv4(v4);
+    return true;
   }
   return false;
 }
@@ -106,12 +155,21 @@ export async function validateProviderUrl(rawUrl, opts = {}) {
     throw new SSRFError('Provider host resolves to a prohibited destination.', 'BLOCKED_HOST');
   }
 
-  // If hostname is an IP literal, check directly.
-  if (isIP(hostname)) {
-    if (!allowPrivateNetwork && isBlockedIP(hostname)) {
+  let hostForDns = hostname;
+  if (hostname.startsWith('[') && hostname.endsWith(']')) hostForDns = hostname.slice(1, -1);
+  const pct = hostForDns.indexOf('%');
+  if (pct !== -1) hostForDns = hostForDns.slice(0, pct);
+  if (isIP(hostForDns)) {
+    if (!allowPrivateNetwork && isBlockedIP(hostForDns)) {
       throw new SSRFError('Provider IP address is in a prohibited range.', 'BLOCKED_IP');
     }
-    return { url: parsed.toString(), resolvedIps: [hostname] };
+    return { url: parsed.toString(), resolvedIps: [hostForDns] };
+  }
+  if (/^[0-9a-f:]+(%.+)?$/i.test(hostForDns) && hostForDns.includes(':')) {
+    if (!allowPrivateNetwork) {
+      throw new SSRFError('Provider IP address is in a prohibited range.', 'BLOCKED_IP');
+    }
+    return { url: parsed.toString(), resolvedIps: [hostForDns] };
   }
 
   // Resolve DNS and check every returned address to prevent DNS rebinding to

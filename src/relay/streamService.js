@@ -1,11 +1,7 @@
-// src/relay/streamService.js
-// SSE streaming relay. Streams provider chunks through to the client with
-// correct [DONE] termination and handles client disconnects. Never buffers the
-// whole stream unnecessarily.
-
 import { getAdapter } from '../providers/adapter.js';
-import { validateProviderUrl } from '../security/ssrf.js';
-import { classifyError, redactText, endpointUrlFor } from '../providers/providerService.js';
+import { parseRetryAfterMs, openUpstreamStream } from '../providers/forward.js';
+import { createSSEParser } from './sse.js';
+import { classifyError, statusToCode, redactText, endpointUrlFor } from '../providers/providerService.js';
 import { processContext } from '../context/engine.js';
 import { listProviders, listCredentials, recordUsage, recordDiagnostic } from '../db/stores.js';
 import { modelUnavailableMessage } from './relayService.js';
@@ -58,8 +54,8 @@ export async function executeStreamRelay({ db, credentialService, scheduler, con
 
   const adapter = getAdapter(provider.apiFormat);
   const apiKey = credentialService.reveal(cred);
-  const headers = adapter.authHeader(provider.authStyle, apiKey);
-  const body = adapter.buildRequest(forwarded, provider);
+  const reqHeaders = adapter.authHeader(provider.authStyle, apiKey);
+  const reqBody = adapter.buildRequest({ ...forwarded, stream_options: { include_usage: true } }, provider);
   const url = endpointUrlFor(provider, adapter.endpointPath);
 
   const startedMono = process.hrtime.bigint();
@@ -70,45 +66,53 @@ export async function executeStreamRelay({ db, credentialService, scheduler, con
   let producedOutput = false;
 
   try {
-    await validateProviderUrl(url, { allowPrivateNetwork: provider.allowPrivateNetwork });
-    const res = await fetch(url, { method: 'POST', headers: Object.assign({ accept: 'text/event-stream', 'content-type': 'application/json' }, headers), body: JSON.stringify(body), redirect: 'manual', signal: controller.signal });
-
-    if (res.status >= 400) {
-      const text = await res.text().catch(() => '');
-      const code = res.status === 429 ? 'RATE_LIMITED' : 'PROVIDER_ERROR';
-      sseError(reply, code, 'Provider responded with HTTP ' + res.status + '. ' + safeMsg(text));
-      recordUsage(db, { requestId: requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, model, status: res.status === 429 ? 'rate_limited' : 'error', httpStatus: res.status, errorCode: code, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+    const incoming = await openUpstreamStream({ url, method: 'POST', headers: { accept: 'text/event-stream', 'content-type': 'application/json', ...reqHeaders }, bodyText: JSON.stringify(reqBody), timeoutMs: provider.requestTimeoutMs, connectTimeoutMs: provider.connectTimeoutMs, allowPrivateNetwork: provider.allowPrivateNetwork, signal: controller.signal });
+    const status = incoming.status || 200;
+    if (status >= 300 && status < 400) {
+      const code = 'INVALID_RESPONSE';
+      sseError(reply, code, 'Provider attempted a redirect; not followed.');
+      recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, model, status: 'error', httpStatus: status, errorCode: code, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+      try { incoming.body && incoming.body.cancel && await incoming.body.cancel(); } catch {}
+      return;
+    }
+    if (status >= 400) {
+      let text = '';
+      try { text = (await incoming.text()).slice(0, 65536); } catch {}
+      const code = statusToCode(status) || 'PROVIDER_ERROR';
+      sseError(reply, code, 'Provider responded with HTTP ' + status + '. ' + safeMsg(text));
+      const rams = parseRetryAfterMs(incoming.headers ? incoming.headers.get('retry-after') : null);
+      scheduler.recordFailure(cred.id, rams != null ? { retryAfterMs: rams } : {});
+      recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, model, status: status === 429 ? 'rate_limited' : 'error', httpStatus: status, errorCode: code, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
       return;
     }
 
-    const reader = res.body.getReader();
+    const parser = createSSEParser();
+    const reader = incoming.body ? incoming.body.getReader() : null;
     const decoder = new TextDecoder();
-    let buffer = '';
-    for (;;) {
-      const r = await reader.read();
-      if (r.done) break;
-      buffer += decoder.decode(r.value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const rawEvent = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        const line = rawEvent.split('\n').find((l) => l.startsWith('data:'));
-        if (!line) continue;
-        const data = line.slice(5).trim();
-        if (data === '[DONE]') {
-          sseWrite(reply, { done: true });
-          sseDone(reply);
-          recordUsage(db, { requestId: requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, model, status: 'success', httpStatus: res.status, tokenSource: 'provider', contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
-          scheduler.recordSuccess(cred.id);
-          return;
+    if (!reader) {
+      sseDone(reply);
+    } else {
+      let doneSeen = false;
+      for (;;) {
+        const r = await reader.read();
+        if (r.done) break;
+        const events = parser.push(decoder.decode(r.value, { stream: true }));
+        for (const ev of events) {
+          if (ev.done) { doneSeen = true; break; }
+          producedOutput = true;
+          try { reply.raw.write('data: ' + ev.data + '\n\n'); } catch {}
         }
-        try { const chunk = JSON.parse(data); producedOutput = true; sseWrite(reply, chunk); }
-        catch (e) { /* ignore malformed chunk */ }
+        if (doneSeen) break;
       }
+      try { reader.cancel && reader.cancel(); } catch {}
     }
-    sseDone(reply);
+    if (producedOutput) {
+      recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, model, status: 'success', httpStatus: status, tokenSource: 'provider', contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+    } else {
+      recordUsage(db, { requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, model, status: 'success', httpStatus: status, contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+    }
     scheduler.recordSuccess(cred.id);
-    recordUsage(db, { requestId: requestId, kind: 'relay', providerId: provider.id, credentialId: cred.id, model, status: 'success', httpStatus: res.status, contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens, latencyMs: Math.round(Number(process.hrtime.bigint() - startedMono) / 1e6) });
+    sseDone(reply);
   } catch (err) {
     const code = classifyError(err);
     if (String(err.message).includes('client_disconnect')) {

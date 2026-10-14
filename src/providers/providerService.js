@@ -11,6 +11,17 @@ import { recordUsage, recordDiagnostic, getProvider, getCredential, listCredenti
 
 /** Classify an upstream error into a stable diagnostic code. */
 export function classifyError(err) {
+  if (err && Number.isInteger(err.httpStatus)) {
+    const mapped = statusToCode(err.httpStatus);
+    if (mapped) return mapped;
+  }
+  if (err && typeof err.code === 'string') {
+    const hm = /^HTTP_(\d{3})$/.exec(err.code);
+    if (hm) {
+      const mapped = statusToCode(Number(hm[1]));
+      if (mapped) return mapped;
+    }
+  }
   if (err instanceof SSRFError) {
     if (err.code === 'DNS_FAILURE') return 'DNS_OR_NETWORK_FAILURE';
     return 'INVALID_CONFIGURATION';
@@ -29,7 +40,7 @@ export function classifyError(err) {
   return 'PROVIDER_ERROR';
 }
 
-function statusToCode(httpStatus) {
+export function statusToCode(httpStatus) {
   if (httpStatus === 401) return 'AUTHENTICATION_FAILURE';
   if (httpStatus === 403) return 'AUTHORIZATION_FAILURE';
   if (httpStatus === 404) return 'MODEL_NOT_FOUND';
@@ -59,10 +70,18 @@ function safeProviderMessage(json, text, httpStatus) {
 }
 
 /** Best-effort redaction of secrets that might appear in provider text. */
-export function redactText(s) {
-  return String(s)
+export function redactText(s, extraSecrets = []) {
+  let out = String(s);
+  for (const sec of extraSecrets || []) {
+    if (typeof sec === 'string' && sec.length >= 8) out = out.split(sec).join('[REDACTED]');
+  }
+  return out
     .replace(/sk-[a-z0-9]{8,}/gi, '[REDACTED]')
-    .replace(/(bearer\s+)[a-z0-9._-]+/gi, '$1[REDACTED]')
+    .replace(/gsk_[a-z0-9]{8,}/gi, '[REDACTED]')
+    .replace(/AIza[a-z0-9_\-]{20,}/g, '[REDACTED]')
+    .replace(/xox[bpas]-[a-z0-9\-]{8,}/gi, '[REDACTED]')
+    .replace(/gh[pousr]_[a-z0-9]{20,}/gi, '[REDACTED]')
+    .replace(/(bearer\s+)[a-z0-9._\-~+/=]+/gi, '$1[REDACTED]')
     .replace(/(hrel_)[a-z0-9]+/gi, '$1[REDACTED]');
 }
 

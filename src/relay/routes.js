@@ -13,13 +13,14 @@ export async function relayRoutes(fastify, opts) {
 
   fastify.get('/health', async () => ({ status: 'ok', uptimeMs: process.uptime() * 1000 }));
 
-  fastify.post('/v1/chat/completions', async (request, reply) => {
-    // 1. Authenticate the client using the relay key (Bearer).
+  fastify.post('/v1/chat/completions', { bodyLimit: config.limits.relayBodyBytes }, async (request, reply) => {
     const authHeader = request.headers.authorization || '';
     const m = /^Bearer\s+(.+)$/i.exec(authHeader);
     const rawKey = m ? m[1].trim() : null;
     const client = rawKey ? relayKeyService.authenticate(rawKey) : null;
     if (!client) {
+      const bad = rateLimiter.check('relay-bad:' + request.ip, 30, 60_000);
+      if (!bad.allowed) return reply.code(429).header('retry-after', String(Math.ceil(bad.retryAfterMs / 1000))).send({ error: { code: 'RATE_LIMITED', message: 'Too many invalid key attempts.' } });
       return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'A valid HUAN RELAY client key is required.' } });
     }
 
@@ -51,9 +52,17 @@ export async function relayRoutes(fastify, opts) {
 
     const requestId = randomUUID();
 
-    // 4. Streaming path.
     if (normalized.stream) {
-      // We hijack the raw response for SSE.
+      const isMasterPre = client.role === 'master';
+      let preErr = null;
+      if (isMasterPre) {
+        const { buildGatewayPool } = await import('./gateway.js');
+        if (!buildGatewayPool(opts.db).length) preErr = 'No enabled provider credential is configured for gateway routing.';
+      } else {
+        const { findProviderForModel } = await import('./relayService.js');
+        if (!findProviderForModel(opts.db, normalized.model)) preErr = null;
+      }
+      if (preErr) return reply.code(502).send({ error: { code: 'MODEL_UNAVAILABLE', message: preErr } });
       reply.hijack();
       openStream(reply);
       if (client.role === 'master') {
