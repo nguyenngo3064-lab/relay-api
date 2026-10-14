@@ -106,6 +106,48 @@ export async function buildApp(overrides = {}) {
     isHttps,
   };
 
+  // Global error handlers: normalize every error (including Fastify's body
+  // parser and validation errors) into the app's consistent
+  // { error: { code, message } } shape. This prevents raw Fastify
+  // FST_ERR_CTP_* "400 Bad Request" responses from leaking internals and keeps
+  // the relay/APIs OpenAI-client friendly.
+  app.setErrorHandler((err, request, reply) => {
+    const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 500;
+
+    // Body parser / validation problems -> clean 400.
+    if (
+      err.code === 'FST_ERR_CTP_INVALID_JSON_BODY' ||
+      err.code === 'FST_ERR_CTP_EMPTY_JSON_BODY' ||
+      err.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE' ||
+      err.code === 'FST_ERR_CTP_BODY_TOO_LARGE'
+    ) {
+      const message = err.code === 'FST_ERR_CTP_BODY_TOO_LARGE'
+        ? 'Request body is too large.'
+        : err.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE'
+          ? 'Content-Type must be application/json.'
+          : 'Request body must be a valid JSON object.';
+      return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message } });
+    }
+
+    // Validation errors (schema) -> 400 with first message.
+    if (err.validation) {
+      return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: err.message || 'Invalid request.' } });
+    }
+
+    // Everything else: never leak internal details in production.
+    if (status >= 500) {
+      logger.error('unhandled error', { url: request.url, method: request.method, message: err.message });
+      return reply.code(status).send({ error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred.' } });
+    }
+    return reply.code(status).send({ error: { code: err.code || 'ERROR', message: err.message || 'Request failed.' } });
+  });
+
+  app.setNotFoundHandler((request, reply) => {
+    // Unmatched routes (e.g. unknown method/path) get a consistent JSON 404.
+    // The SPA shell is served by the explicit app.get('/*') route above.
+    return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Not found.' } });
+  });
+
   await authRoutes(app, shared);
   await adminRoutes(app, shared);
   await relayRoutes(app, shared);

@@ -145,3 +145,36 @@ test('master key streaming works without a model name', async () => {
   assert.match(String(text), /data:/);
   assert.match(String(text), /\[DONE\]/);
 });
+
+test('malformed JSON body returns a clean 400 (not a raw Fastify FST_ERR)', async () => {
+  const { masterKey } = await setupWithKey();
+  const res = await ctx.app.inject({
+    method: 'POST', url: '/v1/chat/completions',
+    headers: { authorization: `Bearer ${masterKey.rawKey}`, 'content-type': 'application/json' },
+    payload: '{ not valid json',
+  });
+  assert.equal(res.statusCode, 400);
+  const body = res.json();
+  // Consistent app shape, no leaked Fastify internals.
+  assert.equal(body.error.code, 'INVALID_REQUEST');
+  assert.ok(body.error.message);
+  assert.equal(body.code, undefined);
+  assert.equal(body.statusCode, undefined);
+});
+
+test('empty JSON body returns a clean 400', async () => {
+  const { masterKey } = await setupWithKey();
+  const res = await ctx.app.inject({
+    method: 'POST', url: '/v1/chat/completions',
+    headers: { authorization: `Bearer ${masterKey.rawKey}`, 'content-type': 'application/json' },
+  });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json().error.code, 'INVALID_REQUEST');
+});
+
+test('unknown admin route returns a clean JSON 404', async () => {
+  const { cookie } = await setupWithKey();
+  const res = await ctx.app.inject({ method: 'GET', url: '/api/admin/does-not-exist', headers: { cookie } });
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.json().error.code, 'NOT_FOUND');
+});
