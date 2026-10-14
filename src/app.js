@@ -78,6 +78,23 @@ export async function buildApp(overrides = {}) {
     trustProxy: config.trustedProxy,
   });
 
+  // Lenient JSON body parser. Accepts any charset on application/json, treats an
+  // empty/whitespace-only body as {} so route validation returns a precise error
+  // (e.g. "messages is required") instead of a generic "not valid JSON", and
+  // raises a clean INVALID_REQUEST on genuinely malformed JSON.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    const text = body == null ? '' : String(body).trim();
+    if (text === '') return done(null, {});
+    try {
+      return done(null, JSON.parse(text));
+    } catch (err) {
+      const e = new Error('Request body must be a valid JSON object.');
+      e.statusCode = 400;
+      e.code = 'INVALID_JSON';
+      return done(e, undefined);
+    }
+  });
+
   const isHttps = config.isProd && config.trustedProxy; // assume TLS at proxy
   registerSecurityHeaders(app, { isHttps });
 
@@ -119,7 +136,8 @@ export async function buildApp(overrides = {}) {
       err.code === 'FST_ERR_CTP_INVALID_JSON_BODY' ||
       err.code === 'FST_ERR_CTP_EMPTY_JSON_BODY' ||
       err.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE' ||
-      err.code === 'FST_ERR_CTP_BODY_TOO_LARGE'
+      err.code === 'FST_ERR_CTP_BODY_TOO_LARGE' ||
+      err.code === 'INVALID_JSON'
     ) {
       const message = err.code === 'FST_ERR_CTP_BODY_TOO_LARGE'
         ? 'Request body is too large.'
