@@ -86,7 +86,9 @@ export function createProviderService(db, credentialService) {
     if (!provider) return { success: false, error: { code: 'INVALID_CONFIGURATION', message: 'Provider not found.' } };
     if (!provider.enabled) return { success: false, providerId, model, error: { code: 'INVALID_CONFIGURATION', message: 'Provider is disabled.' } };
     if (!model || !provider.models.includes(model)) {
-      return { success: false, providerId, model: model || null, error: { code: 'INVALID_CONFIGURATION', message: provider.models.length ? 'Model "' + model + '" is not configured for this provider.' : 'No models configured for this provider.' } };
+      const available = provider.models.length ? ' Available models: ' + provider.models.join(', ') + '.' : '';
+      const msg = provider.models.length ? 'Model "' + model + '" is not configured for this provider.' + available : 'No models configured for this provider. Add at least one model first.';
+      return { success: false, providerId, model: model || null, error: { code: 'INVALID_CONFIGURATION', message: msg } };
     }
     const cred = resolveCredential(db, provider, credentialId);
     if (!cred) return { success: false, providerId, model, error: { code: 'INVALID_CONFIGURATION', message: 'No enabled credential configured for this provider.' } };

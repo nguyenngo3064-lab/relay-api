@@ -355,8 +355,18 @@
   }
 
   function runTest(providerId) {
-    var model = window.prompt('Model to test (must be configured for this provider):', 'nvidia/nemotron-3-ultra');
+    var prov = null;
+    var ps = (state.data.providers && state.data.providers.providers) || [];
+    for (var i = 0; i < ps.length; i++) { if (ps[i].id === providerId) { prov = ps[i]; break; } }
+    var models = (prov && prov.models) || [];
+    if (!models.length) { alert('This provider has no models configured. Add at least one model, then test again.'); return; }
+    var model = window.prompt('Model to test (must be configured for this provider):\nAvailable: ' + models.join(', '), models[0]);
     if (!model) return;
+    model = model.trim();
+    if (models.indexOf(model) === -1) {
+      alert('Model "' + model + '" is not configured for this provider.\nAvailable models: ' + models.join(', '));
+      return;
+    }
     var promptText = window.prompt('Prompt to send:', 'Reply with exactly: OK');
     if (promptText == null) return;
     api('/api/admin/providers/'+providerId+'/test', { method:'POST', body:{ model: model, prompt: promptText } }).then(function(r){
