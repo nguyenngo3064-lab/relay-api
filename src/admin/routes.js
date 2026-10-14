@@ -8,7 +8,7 @@ import {
   usageTimeseries, statusBreakdown,
   listCredentials, deleteCredential, updateCredential,
   listRelayKeys, deleteRelayKey, setRelayKeyEnabled, getMasterRelayKey,
-  getSettings, setSettings, listUsage, usageSummary, listDiagnostics, credentialScoreboard,
+  getSettings, setSettings, getSetting, setSetting, listUsage, usageSummary, listDiagnostics, credentialScoreboard,
 } from '../db/stores.js';
 import { MODES, DEFAULT_SETTINGS } from '../context/engine.js';
 
@@ -29,6 +29,7 @@ export async function adminRoutes(fastify, opts) {
       },
       live: snap,
       persistent: dbTotals,
+      timeseries: usageTimeseries(db, { buckets: 24, bucketMinutes: 60 }),
       scheduler: scheduler.snapshot(),
       caches: cacheManager.stats(),
       context: { settings: contextSettings.snapshot() },
@@ -103,6 +104,11 @@ export async function adminRoutes(fastify, opts) {
       } else if (body[k] !== undefined) out[k] = null;
     }
     if (body.allowPrivateNetwork !== undefined) out.allowPrivateNetwork = !!body.allowPrivateNetwork;
+    if (body.attachedPrompt !== undefined) {
+      if (body.attachedPrompt !== null && typeof body.attachedPrompt !== 'string') return { error: bad('attachedPrompt must be a string.') };
+      const p = typeof body.attachedPrompt === 'string' ? body.attachedPrompt.trim() : '';
+      out.attachedPrompt = p ? p.slice(0, 8000) : null;
+    }
     return { value: out };
   }
   fastify.post('/api/admin/providers', adminPre, async (request, reply) => {
@@ -127,6 +133,7 @@ export async function adminRoutes(fastify, opts) {
       minIntervalMs: v.value.minIntervalMs ?? 0,
       maxConcurrency: v.value.maxConcurrency ?? 1,
       allowPrivateNetwork: !!v.value.allowPrivateNetwork,
+      attachedPrompt: v.value.attachedPrompt ?? null,
     });
     let credential = null;
     let masterKey = null;
@@ -334,20 +341,35 @@ export async function adminRoutes(fastify, opts) {
   // ---- Context stats & settings ----
   fastify.get('/api/admin/context/stats', adminPre, async () => ({ settings: contextSettings.snapshot() }));
 
+  const SUPPORTED_LANGUAGES = new Set(['en', 'vi']);
+
   fastify.get('/api/admin/settings', adminPre, async () => ({
     context: contextSettings.snapshot(),
+    ui: { language: getSetting(db, 'ui', { language: 'en' }).language || 'en' },
+    languages: [...SUPPORTED_LANGUAGES],
     modes: Object.values(MODES),
     defaults: DEFAULT_SETTINGS,
   }));
 
   fastify.patch('/api/admin/settings', adminPre, async (request, reply) => {
-    const { context } = request.body || {};
+    const { context, ui } = request.body || {};
+    const out = {};
     if (context && typeof context === 'object') {
-      const updated = contextSettings.update(context);
-      setSettings(db, { context: updated });
-      return { context: contextSettings.snapshot() };
+      out.context = contextSettings.update(context);
+      setSettings(db, { context: out.context });
     }
-    return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: 'No context settings provided.' } });
+    if (ui && typeof ui === 'object') {
+      const language = String(ui.language || '').trim().toLowerCase();
+      if (!SUPPORTED_LANGUAGES.has(language)) {
+        return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: 'language must be en or vi.' } });
+      }
+      setSetting(db, 'ui', { language });
+      out.ui = { language };
+    }
+    if (!out.context && !out.ui) {
+      return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: 'No settings provided.' } });
+    }
+    return out;
   });
 
   // ---- Cache / Reset RAM ----

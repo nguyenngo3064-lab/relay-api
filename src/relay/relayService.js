@@ -3,6 +3,7 @@
 // applies context processing, forwards, and normalizes the response/errors.
 
 import { forwardOnce, mapErrorStatus } from './forwardOnce.js';
+import { withAttachedPrompt } from './normalize.js';
 import { classifyError, redactText } from '../providers/providerService.js';
 import { processContext } from '../context/engine.js';
 import { listProviders, listCredentials, recordUsage, recordDiagnostic } from '../db/stores.js';
@@ -46,7 +47,9 @@ export async function executeRelay({ db, credentialService, scheduler, contextSe
   }
 
   const processed = processContext(normalized.messages, contextSettings);
-  const forwarded = Object.assign({}, normalized, { messages: processed.messages });
+  const forwarded = Object.assign({}, normalized, {
+    messages: withAttachedPrompt(processed.messages, provider.attachedPrompt),
+  });
 
   const creds = listCredentials(db, provider.id).filter((c) => c.enabled);
   const primary = creds.find((c) => !c.isFallback) || creds[0] || null;

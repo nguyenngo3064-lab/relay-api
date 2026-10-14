@@ -131,4 +131,12 @@ export const MIGRATIONS = [
       db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_credential ON usage_events(credential_id);`);
     },
   },
+  {
+    id: 3,
+    name: 'provider_attached_prompt',
+    up(db) {
+      // Admin-defined prompt attached to every relayed request for this provider.
+      db.exec(`ALTER TABLE providers ADD COLUMN attached_prompt TEXT;`);
+    },
+  },
 ];

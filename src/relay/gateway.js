@@ -1,5 +1,6 @@
 import { getAdapter } from '../providers/adapter.js';
 import { forwardOnce, mapErrorStatus } from './forwardOnce.js';
+import { withAttachedPrompt } from './normalize.js';
 import { classifyError, statusToCode, redactText, endpointUrlFor } from '../providers/providerService.js';
 import { parseRetryAfterMs, openUpstreamStream } from '../providers/forward.js';
 import { createSSEParser } from './sse.js';
@@ -69,7 +70,10 @@ export async function executeGateway({ db, credentialService, scheduler, context
   for (let i = 0; i < pool.length; i++) {
     const entry = pool[i];
     if (i > 0) usedFallback = true;
-    const forwarded = Object.assign({}, normalized, { messages: processed.messages, model: entry.model });
+    const forwarded = Object.assign({}, normalized, {
+      messages: withAttachedPrompt(processed.messages, entry.provider.attachedPrompt),
+      model: entry.model,
+    });
     const gate = scheduler.acquire({ id: entry.cred.id, rateLimitRpm: entry.cred.rateLimitRpm || entry.provider.rateLimitRpm || null, maxConcurrency: entry.provider.maxConcurrency, minIntervalMs: entry.provider.minIntervalMs });
     if (!gate.allowed) {
       lastError = { code: 'RATE_LIMITED', message: 'Credential unavailable (' + gate.reason + ').', retryAfterMs: gate.retryAfterMs };
@@ -112,7 +116,11 @@ export async function executeStreamGateway({ db, credentialService, scheduler, c
   const { provider, cred, model } = entry;
 
   const processed = processContext(normalized.messages, contextSettings);
-  const forwarded = Object.assign({}, normalized, { messages: processed.messages, model, stream: true });
+  const forwarded = Object.assign({}, normalized, {
+    messages: withAttachedPrompt(processed.messages, provider.attachedPrompt),
+    model,
+    stream: true,
+  });
 
   const gate = scheduler.acquire({ id: cred.id, rateLimitRpm: cred.rateLimitRpm || provider.rateLimitRpm || null, maxConcurrency: provider.maxConcurrency, minIntervalMs: provider.minIntervalMs });
   if (!gate.allowed) {

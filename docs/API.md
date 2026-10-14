@@ -24,7 +24,8 @@ requires a HUAN RELAY client key. Error responses use the shape:
 ## Providers (admin)
 
 - `GET   /api/admin/providers`
-- `POST  /api/admin/providers` `{ name, baseUrl, apiFormat?, authStyle?, models[], maxOutputTokens?, allowPrivateNetwork? }`
+- `POST  /api/admin/providers` `{ name, baseUrl, apiFormat?, authStyle?, models[], maxOutputTokens?, allowPrivateNetwork?, attachedPrompt?, apiKey? }`
+- `attachedPrompt`: optional text appended as a trailing system message to every request relayed to this provider (also accepted on `PATCH`).
 - `PATCH /api/admin/providers/:providerId`
 - `DELETE /api/admin/providers/:providerId`
 - `POST  /api/admin/providers/:providerId/test` `{ model, prompt?, credentialId? }` -> structured result
@@ -63,6 +64,10 @@ When usage is absent, `usage.source` is `"unavailable"` and token counts are
 
 ## Client keys (admin)
 
+> The dashboard no longer exposes client keys; the **master key** (below) is the
+> recommended credential for every client. These endpoints remain for per-key
+> rate limiting and the per-key scoreboard.
+
 - `GET   /api/admin/keys`
 - `POST  /api/admin/keys` `{ name?, rateLimitRpm? }` -> `{ key: { id, prefix, rawKey } }` (rawKey shown once)
 - `POST  /api/admin/keys/:keyId/rotate` -> new `rawKey` (old key revoked)
@@ -78,8 +83,9 @@ When usage is absent, `usage.source` is `"unavailable"` and token counts are
 ## Context engine & settings (admin)
 
 - `GET  /api/admin/context/stats`
-- `GET  /api/admin/settings`
+- `GET  /api/admin/settings` -> `{ context, ui: { language }, languages, modes, defaults }`
 - `PATCH /api/admin/settings` `{ context: { enabled, mode, minSavingsRatio, maxRetainedHistory, semanticSummarization, safeFallback } }`
+- `PATCH /api/admin/settings` `{ ui: { language } }` with `language` one of `en` | `vi` (dashboard UI language)
 
 Modes: `off` (forward original), `safe` (conservative), `smart` (aggressive +
 validation). Semantic summarization is disabled by default.

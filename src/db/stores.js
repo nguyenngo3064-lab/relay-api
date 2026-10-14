@@ -66,6 +66,7 @@ export function mapProvider(row) {
     minIntervalMs: row.min_interval_ms,
     maxConcurrency: row.max_concurrency,
     allowPrivateNetwork: !!row.allow_private_network,
+    attachedPrompt: row.attached_prompt ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -90,15 +91,16 @@ export function createProvider(db, p) {
     minIntervalMs: p.minIntervalMs ?? 0,
     maxConcurrency: p.maxConcurrency ?? 1,
     allowPrivateNetwork: p.allowPrivateNetwork ? 1 : 0,
+    attachedPrompt: typeof p.attachedPrompt === 'string' && p.attachedPrompt.trim() ? p.attachedPrompt : null,
   };
   db.prepare(
     `INSERT INTO providers
       (id, name, type, base_url, api_format, auth_style, enabled, models, capabilities,
        request_timeout_ms, connect_timeout_ms, max_output_tokens, rate_limit_rpm,
-       min_interval_ms, max_concurrency, allow_private_network, created_at, updated_at)
+       min_interval_ms, max_concurrency, allow_private_network, attached_prompt, created_at, updated_at)
      VALUES (@id, @name, @type, @baseUrl, @apiFormat, @authStyle, @enabled, @models, @capabilities,
        @requestTimeoutMs, @connectTimeoutMs, @maxOutputTokens, @rateLimitRpm,
-       @minIntervalMs, @maxConcurrency, @allowPrivateNetwork, @createdAt, @updatedAt)`
+       @minIntervalMs, @maxConcurrency, @allowPrivateNetwork, @attachedPrompt, @createdAt, @updatedAt)`
   ).run({ ...rec, createdAt: ts, updatedAt: ts });
   return getProvider(db, rec.id);
 }
@@ -119,7 +121,7 @@ export function updateProvider(db, id, patch) {
       request_timeout_ms=@requestTimeoutMs, connect_timeout_ms=@connectTimeoutMs,
       max_output_tokens=@maxOutputTokens, rate_limit_rpm=@rateLimitRpm,
       min_interval_ms=@minIntervalMs, max_concurrency=@maxConcurrency,
-      allow_private_network=@allowPrivateNetwork, updated_at=@updatedAt WHERE id=@id`
+      allow_private_network=@allowPrivateNetwork, attached_prompt=@attachedPrompt, updated_at=@updatedAt WHERE id=@id`
   ).run({
     id,
     name: merged.name,
@@ -137,6 +139,7 @@ export function updateProvider(db, id, patch) {
     minIntervalMs: merged.minIntervalMs ?? 0,
     maxConcurrency: merged.maxConcurrency ?? 1,
     allowPrivateNetwork: merged.allowPrivateNetwork ? 1 : 0,
+    attachedPrompt: merged.attachedPrompt ?? null,
     updatedAt: now(),
   });
   return getProvider(db, id);

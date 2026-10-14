@@ -1,6 +1,7 @@
 import { getAdapter } from '../providers/adapter.js';
 import { parseRetryAfterMs, openUpstreamStream } from '../providers/forward.js';
 import { createSSEParser } from './sse.js';
+import { withAttachedPrompt } from './normalize.js';
 import { classifyError, statusToCode, redactText, endpointUrlFor } from '../providers/providerService.js';
 import { processContext } from '../context/engine.js';
 import { listProviders, listCredentials, recordUsage, recordDiagnostic } from '../db/stores.js';
@@ -39,7 +40,10 @@ export async function executeStreamRelay({ db, credentialService, scheduler, con
   if (!provider) { sseError(reply, 'MODEL_UNAVAILABLE', modelUnavailableMessage(db, model)); return; }
 
   const processed = processContext(normalized.messages, contextSettings);
-  const forwarded = Object.assign({}, normalized, { messages: processed.messages, stream: true });
+  const forwarded = Object.assign({}, normalized, {
+    messages: withAttachedPrompt(processed.messages, provider.attachedPrompt),
+    stream: true,
+  });
 
   const creds = listCredentials(db, provider.id).filter((c) => c.enabled);
   const cred = creds.find((c) => !c.isFallback) || creds[0] || null;

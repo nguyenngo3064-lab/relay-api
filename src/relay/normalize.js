@@ -65,6 +65,16 @@ export function normalizeChatRequest(body) {
   return normalized;
 }
 
+/**
+ * Attach an admin-configured prompt to the message list. The prompt is appended
+ * as a trailing system message so it rides along with every relayed request
+ * without rewriting the caller's own system prompt.
+ */
+export function withAttachedPrompt(messages, prompt) {
+  if (typeof prompt !== 'string' || prompt.trim() === '') return messages;
+  return messages.concat([{ role: 'system', content: prompt.trim() }]);
+}
+
 function normalizeMessage(m, index) {
   if (!m || typeof m !== 'object') {
     throw new NormalizeError(`messages[${index}] must be an object.`, 'INVALID_REQUEST', `messages[${index}]`);
