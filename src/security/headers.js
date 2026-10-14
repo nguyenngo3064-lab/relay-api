@@ -34,6 +34,17 @@ function buildCsp(isHttps) {
   return directives.join('; ');
 }
 
+/**
+ * Build the full security header map (base headers + CSP + optional HSTS).
+ * Used by the onSend hook for normal responses AND by the hijacked streaming
+ * (SSE) path, which bypasses onSend (HREL-2026-002).
+ */
+export function securityHeaders(isHttps = false) {
+  const headers = { ...BASE_HEADERS, 'content-security-policy': buildCsp(isHttps) };
+  if (isHttps) headers['strict-transport-security'] = 'max-age=15552000; includeSubDomains';
+  return headers;
+}
+
 export function registerSecurityHeaders(fastify, { isHttps = false } = {}) {
   fastify.addHook('onSend', async (request, reply, payload) => {
     for (const [k, v] of Object.entries(BASE_HEADERS)) {

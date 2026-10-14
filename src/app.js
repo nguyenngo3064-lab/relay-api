@@ -8,6 +8,7 @@ import { createDatabase } from './db/index.js';
 import { hasAdminAccount, getSetting, createAdminAccount, pruneOldEvents } from './db/stores.js';
 import { createLogger } from './observability/logger.js';
 import { RateLimiter } from './security/rateLimit.js';
+import { ConcurrencyGate } from './security/concurrency.js';
 import { registerSecurityHeaders } from './security/headers.js';
 import { applyAuth } from './auth/guard.js';
 import { createSessionService } from './auth/session.js';
@@ -61,6 +62,7 @@ export async function buildApp(overrides = {}) {
   }
 
   const rateLimiter = new RateLimiter();
+  const concurrency = new ConcurrencyGate(config.limits.maxConcurrentRequests);
   const scheduler = new Scheduler();
   const metrics = new LiveMetrics();
   const responseCache = new BoundedCache({ maxEntries: 256, ttlMs: 5 * 60_000 });
@@ -112,6 +114,7 @@ export async function buildApp(overrides = {}) {
     db,
     logger,
     rateLimiter,
+    concurrency,
     scheduler,
     metrics,
     cacheManager,
@@ -194,7 +197,7 @@ export async function buildApp(overrides = {}) {
   }, 60 * 60 * 1000);
   if (cleanupTimer.unref) cleanupTimer.unref();
   app.addHook('onClose', async () => { clearInterval(cleanupTimer); });
-  app.decorate('_internal', { db, config, metrics, cacheManager, scheduler, rateLimiter, sessionService, contextSettings, logger });
+  app.decorate('_internal', { db, config, metrics, cacheManager, scheduler, rateLimiter, concurrency, sessionService, contextSettings, logger });
 
   return app;
 }
