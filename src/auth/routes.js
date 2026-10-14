@@ -16,10 +16,10 @@ import { issueCsrfToken, setCsrfCookie, clearCsrfCookie } from './csrf.js';
 export async function authRoutes(fastify, opts) {
   const { config, rateLimiter, isHttps, sessionService, logger } = opts;
 
-  function issueSessionAndCsrf(reply, { rotate = false, existingId = null } = {}) {
+  function issueSessionAndCsrf(reply, { rotate = false, existingId = null, persistent = false } = {}) {
     let sid = null;
-    if (rotate) sid = sessionService.rotate(reply, existingId, { isHttps }).id;
-    else sid = sessionService.start(reply, { isHttps }).id;
+    if (rotate) sid = sessionService.rotate(reply, existingId, { isHttps, persistent }).id;
+    else sid = sessionService.start(reply, { isHttps, persistent }).id;
     const csrfToken = issueCsrfToken(config.sessionSecret, sid);
     setCsrfCookie(reply, csrfToken, { isHttps });
     return csrfToken;
@@ -37,7 +37,7 @@ export async function authRoutes(fastify, opts) {
     if (config.isProd && !config.bootstrapPassword && !config.adminPasswordHash && !config.setupToken) {
       return reply.code(403).send({ error: { code: 'SETUP_DISABLED', message: 'First-run setup is disabled in production. Set ADMIN_BOOTSTRAP_PASSWORD, ADMIN_PASSWORD_HASH, or ADMIN_SETUP_TOKEN.' } });
     }
-    const { password, setupToken } = request.body || {};
+    const { password, setupToken, remember } = request.body || {};
     if (config.setupToken && setupToken !== config.setupToken) {
       return reply.code(403).send({ error: { code: 'SETUP_FORBIDDEN', message: 'A valid setup token is required.' } });
     }
@@ -48,7 +48,7 @@ export async function authRoutes(fastify, opts) {
     }
     const record = await hashPassword(password);
     createAdminAccount(opts.db, record, { mustChange: false });
-    const csrfToken = issueSessionAndCsrf(reply);
+    const csrfToken = issueSessionAndCsrf(reply, { persistent: remember === true });
     logger.info('admin account created via first-run setup');
     return { ok: true, csrfToken };
   });
@@ -66,7 +66,7 @@ export async function authRoutes(fastify, opts) {
       });
     }
     const account = getAdminAccount(opts.db);
-    const { password } = request.body || {};
+    const { password, remember } = request.body || {};
     // Uniform failure to avoid account-existence oracle.
     if (!account || typeof password !== 'string' || !(await verifyPassword(password, account.passwordRecord))) {
       logger.warn('failed login attempt', { ip: request.ip });
@@ -74,8 +74,8 @@ export async function authRoutes(fastify, opts) {
     }
     rateLimiter.reset('login:' + request.ip);
     const existingId = request.authSession ? request.authSession.id : null;
-    const csrfToken = issueSessionAndCsrf(reply, { rotate: true, existingId });
-    logger.info('admin login success');
+    const csrfToken = issueSessionAndCsrf(reply, { rotate: true, existingId, persistent: remember === true });
+    logger.info('admin login success', { remember: remember === true });
     return { ok: true, csrfToken, mustChangePassword: account.mustChange };
   });
 

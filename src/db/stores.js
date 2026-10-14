@@ -311,17 +311,17 @@ export function setSettings(db, obj) {
 
 /* --------------------------------- Sessions -------------------------------- */
 
-export function createSession(db, idHash, ttlMs) {
+export function createSession(db, idHash, ttlMs, { persistent = false } = {}) {
   const ts = now();
   const expires = new Date(Date.now() + ttlMs).toISOString();
-  db.prepare('INSERT INTO sessions (id_hash, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?)').run(idHash, ts, expires, ts);
+  db.prepare('INSERT INTO sessions (id_hash, created_at, expires_at, last_seen_at, persistent) VALUES (?, ?, ?, ?, ?)').run(idHash, ts, expires, ts, persistent ? 1 : 0);
   return expires;
 }
 
 export function getSession(db, idHash) {
   const r = db.prepare('SELECT * FROM sessions WHERE id_hash = ?').get(idHash);
   if (!r) return null;
-  return { idHash: r.id_hash, createdAt: r.created_at, expiresAt: r.expires_at, lastSeenAt: r.last_seen_at };
+  return { idHash: r.id_hash, createdAt: r.created_at, expiresAt: r.expires_at, lastSeenAt: r.last_seen_at, persistent: !!r.persistent };
 }
 
 export function touchSession(db, idHash) {

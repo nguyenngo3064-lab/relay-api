@@ -70,7 +70,7 @@ export async function buildApp(overrides = {}) {
   const relayKeyService = createRelayKeyService(db, config.keyPepper);
   const providerService = createProviderService(db, credentialService);
   const contextSettings = createContextSettings(getSetting(db, 'context', {}));
-  const sessionService = createSessionService(db);
+  const sessionService = createSessionService(db, { rememberTtlMs: config.limits.rememberTtlDays * 24 * 60 * 60 * 1000 });
 
   const app = Fastify({
     logger: false, // we use our own redacting logger

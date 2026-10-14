@@ -139,4 +139,15 @@ export const MIGRATIONS = [
       db.exec(`ALTER TABLE providers ADD COLUMN attached_prompt TEXT;`);
     },
   },
+  {
+    id: 4,
+    name: 'persistent_remember_me_sessions',
+    up(db) {
+      // "Remember me" sessions: a persistent login that survives browser restarts
+      // for a bounded lifetime (REMEMBER_TTL_DAYS, default 30). Non-persistent
+      // sessions keep the short idle/absolute behavior. Existing rows default to 0
+      // (non-persistent), so current sessions are unaffected by this migration.
+      db.exec(`ALTER TABLE sessions ADD COLUMN persistent INTEGER NOT NULL DEFAULT 0;`);
+    },
+  },
 ];
