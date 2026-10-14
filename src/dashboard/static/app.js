@@ -69,7 +69,7 @@
     var labels = { overview:'Overview', providers:'Providers', keys:'Client keys', master:'Master key', scoreboard:'Scoreboard', usage:'Usage', context:'Context engine', settings:'Security' };
     var nav = tabs.map(function(t){ return '<button data-tab="'+t+'" class="'+(state.tab===t?'active':'')+'">'+labels[t]+'</button>'; }).join('');
     return '<div class="wrap">' +
-      '<header class="top"><div class="brand">HUAN RELAY <small>self-hosted AI gateway</small></div>' +
+      '<header class="top"><div class="brand"><span class="dot"></span>HUAN RELAY <small>self-hosted AI gateway</small></div>' +
       '<nav class="tabs">'+nav+'</nav>' +
       '<button class="btn ghost" id="logout">Sign out</button></header>' +
       '<main>'+inner+'</main></div>';
