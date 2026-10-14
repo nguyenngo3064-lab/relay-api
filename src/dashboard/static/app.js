@@ -422,7 +422,7 @@
 
   /* ----------------------------- Providers ----------------------------- */
   function viewProviders(d) {
-    var ps = (d.providers && d.providers.providers) || [];
+    var ps = d.providers || [];
     var out = '<h1>' + esc(t('pv.title')) + '</h1><p class="lede">' + esc(t('pv.lede')) + '</p>';
     out += '<div id="addprovresult"></div>';
     out += '<div class="panel"><div class="panel-head"><h2>' + esc(t('pv.add')) + '</h2></div>' +
