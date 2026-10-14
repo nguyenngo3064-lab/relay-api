@@ -6,13 +6,19 @@ import { classifyError, statusToCode, redactText, endpointUrlFor } from '../prov
 import { processContext } from '../context/engine.js';
 import { listProviders, listCredentials, recordUsage, recordDiagnostic } from '../db/stores.js';
 import { modelUnavailableMessage } from './relayService.js';
+import { securityHeaders } from '../security/headers.js';
 
-export function openStream(reply) {
+export function openStream(reply, { isHttps = false } = {}) {
+  // The streaming path uses reply.hijack(), which bypasses Fastify's onSend hook,
+  // so security headers (CSP, X-Frame-Options, nosniff, ...) must be applied here
+  // explicitly. (HREL-2026-002)
+  const base = securityHeaders(isHttps);
   reply.raw.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache, no-transform',
     connection: 'keep-alive',
     'x-accel-buffering': 'no',
+    ...base,
   });
   reply.raw.flushHeaders && reply.raw.flushHeaders();
 }
