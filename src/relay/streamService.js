@@ -8,6 +8,7 @@ import { validateProviderUrl } from '../security/ssrf.js';
 import { classifyError, redactText, endpointUrlFor } from '../providers/providerService.js';
 import { processContext } from '../context/engine.js';
 import { listProviders, listCredentials, recordUsage, recordDiagnostic } from '../db/stores.js';
+import { modelUnavailableMessage } from './relayService.js';
 
 export function openStream(reply) {
   reply.raw.writeHead(200, {
@@ -39,7 +40,7 @@ function safeMsg(text) {
 export async function executeStreamRelay({ db, credentialService, scheduler, contextSettings, normalized, reply, requestId }) {
   const model = normalized.model;
   const provider = listProviders(db).find((p) => p.enabled && p.models.includes(model));
-  if (!provider) { sseError(reply, 'MODEL_UNAVAILABLE', 'No enabled provider configured for model "' + model + '".'); return; }
+  if (!provider) { sseError(reply, 'MODEL_UNAVAILABLE', modelUnavailableMessage(db, model)); return; }
 
   const processed = processContext(normalized.messages, contextSettings);
   const forwarded = Object.assign({}, normalized, { messages: processed.messages, stream: true });

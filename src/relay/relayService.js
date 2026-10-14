@@ -14,6 +14,24 @@ export function findProviderForModel(db, model) {
   return providers[0] || null;
 }
 
+/** All models exposed by enabled providers (unique, sorted). */
+export function availableModels(db) {
+  const set = new Set();
+  for (const p of listProviders(db)) {
+    if (!p.enabled) continue;
+    for (const m of p.models || []) set.add(m);
+  }
+  return [...set].sort();
+}
+
+/** Build a helpful MODEL_UNAVAILABLE message listing what IS configured. */
+export function modelUnavailableMessage(db, model) {
+  const models = availableModels(db);
+  const base = 'No enabled provider is configured for model "' + model + '".';
+  if (!models.length) return base + ' No enabled provider has any model configured — add at least one model to a provider.';
+  return base + ' Available models: ' + models.join(', ') + '.';
+}
+
 function mapErrorStatus(code) {
   switch (code) {
     case 'MODEL_UNAVAILABLE':
@@ -68,7 +86,7 @@ export async function executeRelay({ db, credentialService, scheduler, contextSe
   const model = normalized.model;
   const provider = findProviderForModel(db, model);
   if (!provider) {
-    const err = new Error('No enabled provider is configured for model "' + model + '".');
+    const err = new Error(modelUnavailableMessage(db, model));
     err.code = 'MODEL_UNAVAILABLE';
     err.status = 404;
     throw err;
