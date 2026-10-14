@@ -31,6 +31,11 @@ certification.
 - Idle (30 min) and absolute (12 h) expiry; logout destroys the session.
 - Login rate limiting per IP.
 - Password minimum length 12; change requires the current password.
+- Optional "Remember me": when enabled at login, the session cookie becomes a
+  bounded persistent cookie (`REMEMBER_TTL_DAYS`, default 30) that survives
+  browser restarts. It is still HttpOnly + SameSite=Strict (+ Secure behind a
+  trusted TLS proxy) and still stores only a hashed session id. Disabled by
+  default (short idle/absolute expiry otherwise).
 
 ### CSRF
 - `SameSite=Strict` cookies **plus** a signed double-submit token required in the

@@ -100,6 +100,7 @@ export function loadConfig(env = process.env) {
     maxContextTokens: [env.MAX_CONTEXT_TOKENS, 120000, 1000, 2000000],
     relayBodyBytes: [env.RELAY_MAX_BODY_BYTES, 8 * 1024 * 1024, 1024, 25 * 1024 * 1024],
     retentionDays: [env.RETENTION_DAYS, 30, 1, 365],
+    rememberTtlDays: [env.REMEMBER_TTL_DAYS, 30, 1, 365],
   };
   const limits = {};
   for (const [name, [raw, fallback, min, max]] of Object.entries(limitDefs)) {

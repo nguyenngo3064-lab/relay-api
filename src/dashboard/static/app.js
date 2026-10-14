@@ -15,6 +15,7 @@
       'login.setup.title': 'Create administrator', 'login.setup.lede': 'Set a strong administrator password (min 12 characters) to begin.',
       'login.title': 'Sign in', 'login.lede': 'Enter your administrator password.',
       'login.pw': 'Password', 'login.submit.setup': 'Create account', 'login.submit': 'Sign in',
+      'login.remember': 'Keep me signed in on this device',
       'login.offline': 'Cannot reach server.',
       'err.generic': 'Something went wrong.',
       'loading': 'Loading...',
@@ -81,6 +82,7 @@
       'login.setup.title': 'Tạo quản trị viên', 'login.setup.lede': 'Đặt mật khẩu quản trị viên mạnh (tối thiểu 12 ký tự) để bắt đầu.',
       'login.title': 'Đăng nhập', 'login.lede': 'Nhập mật khẩu quản trị viên.',
       'login.pw': 'Mật khẩu', 'login.submit.setup': 'Tạo tài khoản', 'login.submit': 'Đăng nhập',
+      'login.remember': 'Duy trì đăng nhập trên thiết bị này',
       'login.offline': 'Không kết nối được với máy chủ.',
       'err.generic': 'Đã xảy ra lỗi.',
       'loading': 'Đang tải...',
@@ -235,16 +237,18 @@
       (banner || '') +
       '<form id="authform">' +
       '<label class="field"><span>' + esc(t('login.pw')) + '</span><input type="password" id="pw" autocomplete="current-password" required /></label>' +
+      '<label class="field" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="remember" style="width:auto" /> <span style="margin:0">' + esc(t('login.remember')) + '</span></label>' +
       '<div class="row"><button class="btn" type="submit">' + esc(setupRequired ? t('login.submit.setup') : t('login.submit')) + '</button></div>' +
       '</form></div></div>';
     bindLangSwitch();
     document.getElementById('authform').addEventListener('submit', async function (e) {
       e.preventDefault();
       var pw = document.getElementById('pw').value;
+      var remember = !!(document.getElementById('remember') && document.getElementById('remember').checked);
       var btn = e.target.querySelector('button');
       btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
       try {
-        var r = await api(setupRequired ? '/api/auth/setup' : '/api/auth/login', { method:'POST', body:{ password: pw } });
+        var r = await api(setupRequired ? '/api/auth/setup' : '/api/auth/login', { method:'POST', body:{ password: pw, remember: remember } });
         state.csrf = r.csrfToken; state.authed = true;
         route();
       } catch (err) {
