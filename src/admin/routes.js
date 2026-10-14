@@ -6,14 +6,14 @@ import { randomUUID } from 'node:crypto';
 import {
   listProviders, getProvider, createProvider, updateProvider, deleteProvider,
   listCredentials, deleteCredential, updateCredential,
-  listRelayKeys, deleteRelayKey, setRelayKeyEnabled,
-  getSettings, setSettings, listUsage, usageSummary, listDiagnostics,
+  listRelayKeys, deleteRelayKey, setRelayKeyEnabled, getMasterRelayKey,
+  getSettings, setSettings, listUsage, usageSummary, listDiagnostics, credentialScoreboard,
 } from '../db/stores.js';
 import { createCredentialService } from '../providers/credentialService.js';
 import { MODES, DEFAULT_SETTINGS } from '../context/engine.js';
 
 export async function adminRoutes(fastify, opts) {
-  const { db, credentialService, relayKeyService, providerService, metrics, cacheManager, scheduler, contextSettings, config, logger } = opts;
+  const { db, credentialService, relayKeyService, providerService, metrics, cacheManager, scheduler, contextSettings, config, isHttps, logger } = opts;
   const adminPre = { preHandler: fastify.requireAdmin };
 
   // ---- Overview ----
@@ -71,8 +71,48 @@ export async function adminRoutes(fastify, opts) {
       maxConcurrency: Number(body.maxConcurrency) || 1,
       allowPrivateNetwork: !!body.allowPrivateNetwork,
     });
-    return { provider };
+
+    // Optional inline API key: store the first credential together with the
+    // provider so setup is a single step (URL + model + key).
+    let credential = null;
+    let masterKey = null;
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+    if (apiKey) {
+      if (!credentialService.configured) {
+        return reply.code(400).send({ error: { code: 'ENCRYPTION_NOT_CONFIGURED', message: 'RELAY_ENCRYPTION_KEY is not configured. Refusing to store credentials.' } });
+      }
+      credential = credentialService.store(provider.id, 'primary', apiKey, { isFallback: false });
+      logger.info('provider credential stored', { providerId: provider.id, credentialId: credential.id });
+      // After the very first provider key, ensure the gateway/master key exists.
+      masterKey = ensureMasterKey();
+    }
+    return { provider, credential: credential ? { id: credential.id, label: credential.label, keyHint: credential.keyHint } : null, masterKey };
   });
+
+  /** Ensure a single master/gateway relay key exists. Returns it (rawKey once). */
+  function ensureMasterKey() {
+    const result = relayKeyService.ensureMaster({ rateLimitRpm: null });
+    if (result.created) {
+      logger.info('gateway master key created', { keyId: result.id });
+      return {
+        created: true,
+        id: result.id,
+        name: result.name,
+        prefix: result.prefix,
+        role: 'master',
+        rawKey: result.rawKey,
+        relayUrl: gatewayUrl(),
+        warning: 'Store this master key now. It will not be shown again. Use it with the relay URL for every client.',
+      };
+    }
+    return { created: false, id: result.id, name: result.name, prefix: result.prefix, role: 'master', relayUrl: gatewayUrl() };
+  }
+
+  function gatewayUrl() {
+    const scheme = isHttps ? 'https' : 'http';
+    const host = config.host === '0.0.0.0' ? '127.0.0.1' : config.host;
+    return `${scheme}://${host}:${config.port}/v1/chat/completions`;
+  }
 
   fastify.patch('/api/admin/providers/:providerId', adminPre, async (request, reply) => {
     const patch = request.body || {};
@@ -178,6 +218,45 @@ export async function adminRoutes(fastify, opts) {
   });
 
   fastify.delete('/api/admin/keys/:keyId', adminPre, async (request) => ({ ok: relayKeyService.remove(request.params.keyId) }));
+
+  // ---- Gateway master key ----
+  // The master key is a single relay key that load-balances across every
+  // enabled provider credential. Clients need only this key + the relay URL.
+  fastify.get('/api/admin/master-key', adminPre, async () => {
+    const master = getMasterRelayKey(db);
+    return {
+      exists: !!master,
+      masterKey: master ? { id: master.id, name: master.name, prefix: master.prefix, lastUsedAt: master.lastUsedAt, enabled: master.enabled } : null,
+      relayUrl: gatewayUrl(),
+    };
+  });
+
+  fastify.post('/api/admin/master-key', adminPre, async (request, reply) => {
+    const existing = getMasterRelayKey(db);
+    if (existing) {
+      return reply.code(409).send({ error: { code: 'ALREADY_EXISTS', message: 'A master key already exists. Rotate it instead of creating a new one.' } });
+    }
+    const providers = listProviders(db);
+    const hasCredential = providers.some((p) => listCredentials(db, p.id).some((c) => c.enabled));
+    if (!hasCredential) {
+      return reply.code(400).send({ error: { code: 'NO_CREDENTIALS', message: 'Add at least one provider API key before creating the master key.' } });
+    }
+    return { masterKey: ensureMasterKey() };
+  });
+
+  fastify.post('/api/admin/master-key/rotate', adminPre, async (request, reply) => {
+    const master = getMasterRelayKey(db);
+    if (!master) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'No master key exists.' } });
+    const rotated = relayKeyService.rotate(master.id);
+    logger.info('gateway master key rotated', { keyId: rotated.id });
+    return { masterKey: { created: true, id: rotated.id, name: rotated.name, prefix: rotated.prefix, rawKey: rotated.rawKey, relayUrl: gatewayUrl(), warning: 'Store this master key now. It will not be shown again.' } };
+  });
+
+  // ---- Per-API-key usage scoreboard ----
+  fastify.get('/api/admin/scoreboard', adminPre, async (request) => {
+    const since = request.query.since ? String(request.query.since) : null;
+    return { scoreboard: credentialScoreboard(db, since) };
+  });
 
   // ---- Usage & diagnostics ----
   fastify.get('/api/admin/usage', adminPre, async (request) => {

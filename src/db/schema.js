@@ -117,4 +117,18 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    id: 2,
+    name: 'gateway_master_key_and_scoreboard',
+    up(db) {
+      // relay_keys.role: 'client' (scoped to a model) or 'master' (gateway key
+      // that load-balances across every enabled provider credential).
+      db.exec(`ALTER TABLE relay_keys ADD COLUMN role TEXT NOT NULL DEFAULT 'client';`);
+
+      // Track which client key issued each request, for the per-key scoreboard.
+      db.exec(`ALTER TABLE usage_events ADD COLUMN relay_key_id TEXT;`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_relay_key ON usage_events(relay_key_id);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_credential ON usage_events(credential_id);`);
+    },
+  },
 ];

@@ -231,6 +231,7 @@ export function listRelayKeys(db) {
     lastUsedAt: r.last_used_at,
     createdAt: r.created_at,
     revokedAt: r.revoked_at,
+    role: r.role || 'client',
     // salt/hash intentionally omitted from listings
   }));
 }
@@ -238,16 +239,22 @@ export function listRelayKeys(db) {
 export function getRelayKey(db, id) {
   const r = db.prepare('SELECT * FROM relay_keys WHERE id = ?').get(id);
   if (!r) return null;
-  return { id: r.id, name: r.name, salt: r.salt, hash: r.hash, prefix: r.prefix, enabled: !!r.enabled, rateLimitRpm: r.rate_limit_rpm, lastUsedAt: r.last_used_at, createdAt: r.created_at, revokedAt: r.revoked_at };
+  return { id: r.id, name: r.name, salt: r.salt, hash: r.hash, prefix: r.prefix, enabled: !!r.enabled, rateLimitRpm: r.rate_limit_rpm, lastUsedAt: r.last_used_at, createdAt: r.created_at, revokedAt: r.revoked_at, role: r.role || 'client' };
+}
+
+/** Return the single enabled master/gateway key, or null. */
+export function getMasterRelayKey(db) {
+  const r = db.prepare("SELECT * FROM relay_keys WHERE role = 'master' AND revoked_at IS NULL ORDER BY created_at ASC").get();
+  return r ? getRelayKey(db, r.id) : null;
 }
 
 export function createRelayKey(db, k) {
   const ts = now();
   const id = k.id || randomUUID();
   db.prepare(
-    `INSERT INTO relay_keys (id, name, salt, hash, prefix, enabled, rate_limit_rpm, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, k.name, k.salt, k.hash, k.prefix, k.enabled === false ? 0 : 1, k.rateLimitRpm ?? null, ts);
+    `INSERT INTO relay_keys (id, name, salt, hash, prefix, enabled, rate_limit_rpm, role, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, k.name, k.salt, k.hash, k.prefix, k.enabled === false ? 0 : 1, k.rateLimitRpm ?? null, k.role || 'client', ts);
   return getRelayKey(db, id);
 }
 
@@ -331,12 +338,12 @@ export function deleteExpiredSessions(db) {
 export function recordUsage(db, e) {
   db.prepare(
     `INSERT INTO usage_events
-      (request_id, kind, provider_id, credential_id, model, status, http_status, error_code,
+      (request_id, kind, provider_id, credential_id, relay_key_id, model, status, http_status, error_code,
        error_message, prompt_tokens, completion_tokens, total_tokens, token_source,
        context_tokens_before, context_tokens_after, latency_ms, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    e.requestId, e.kind, e.providerId ?? null, e.credentialId ?? null, e.model ?? null, e.status,
+    e.requestId, e.kind, e.providerId ?? null, e.credentialId ?? null, e.relayKeyId ?? null, e.model ?? null, e.status,
     e.httpStatus ?? null, e.errorCode ?? null, e.errorMessage ?? null,
     e.promptTokens ?? null, e.completionTokens ?? null, e.totalTokens ?? null, e.tokenSource ?? null,
     e.contextTokensBefore ?? null, e.contextTokensAfter ?? null, e.latencyMs ?? null, now()
@@ -368,6 +375,59 @@ export function usageSummary(db, since = null) {
     FROM usage_events ${where}
   `).get(...args);
   return totals;
+}
+
+/**
+ * Per-provider-credential usage scoreboard, ranked by activity. Each row shows
+ * requests, success/error counts, tokens, and a computed health score (0-100)
+ * derived from the success rate. Joined with provider name + credential label.
+ */
+export function credentialScoreboard(db, since = null) {
+  const where = since ? 'WHERE u.created_at >= ?' : '';
+  const args = since ? [since] : [];
+  const rows = db.prepare(`
+    SELECT
+      u.credential_id as credentialId,
+      u.provider_id as providerId,
+      p.name as providerName,
+      c.label as label,
+      c.key_hint as keyHint,
+      COUNT(*) as requests,
+      SUM(CASE WHEN u.status IN ('success','fallback') THEN 1 ELSE 0 END) as success,
+      SUM(CASE WHEN u.status = 'error' THEN 1 ELSE 0 END) as error,
+      SUM(CASE WHEN u.status = 'rate_limited' THEN 1 ELSE 0 END) as rate_limited,
+      SUM(COALESCE(u.total_tokens,0)) as total_tokens,
+      AVG(u.latency_ms) as avg_latency,
+      MAX(u.created_at) as last_used_at
+    FROM usage_events u
+    LEFT JOIN providers p ON p.id = u.provider_id
+    LEFT JOIN credentials c ON c.id = u.credential_id
+    ${where}
+    GROUP BY u.credential_id
+    ORDER BY requests DESC, total_tokens DESC
+  `).all(...args);
+  return rows
+    .filter((r) => r.credentialId)
+    .map((r) => {
+      const requests = r.requests || 0;
+      const success = r.success || 0;
+      const score = requests ? Math.round((success / requests) * 100) : 0;
+      return {
+        credentialId: r.credentialId,
+        providerId: r.providerId,
+        providerName: r.providerName || '—',
+        label: r.label || '—',
+        keyHint: r.keyHint || '',
+        requests,
+        success,
+        error: r.error || 0,
+        rateLimited: r.rate_limited || 0,
+        totalTokens: r.total_tokens || 0,
+        avgLatencyMs: r.avg_latency != null ? Math.round(r.avg_latency) : null,
+        lastUsedAt: r.last_used_at,
+        score,
+      };
+    });
 }
 
 export function recordDiagnostic(db, d) {

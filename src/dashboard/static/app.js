@@ -2,7 +2,7 @@
 // No third-party libraries. Respects the CSP (no inline handlers).
 (function () {
   'use strict';
-  var state = { authed: false, tab: 'overview', csrf: '', data: {} };
+  var state = { authed: false, tab: 'overview', csrf: '', data: {}, masterKeyShown: null };
   var root = document.getElementById('root');
 
   function esc(s) {
@@ -65,8 +65,8 @@
   }
 
   function shell(inner) {
-    var tabs = ['overview','providers','keys','usage','context','settings'];
-    var labels = { overview:'Overview', providers:'Providers', keys:'Client keys', usage:'Usage', context:'Context engine', settings:'Security' };
+    var tabs = ['overview','providers','keys','master','scoreboard','usage','context','settings'];
+    var labels = { overview:'Overview', providers:'Providers', keys:'Client keys', master:'Master key', scoreboard:'Scoreboard', usage:'Usage', context:'Context engine', settings:'Security' };
     var nav = tabs.map(function(t){ return '<button data-tab="'+t+'" class="'+(state.tab===t?'active':'')+'">'+labels[t]+'</button>'; }).join('');
     return '<div class="wrap">' +
       '<header class="top"><div class="brand">HUAN RELAY <small>self-hosted AI gateway</small></div>' +
@@ -140,6 +140,7 @@
       '<label class="field"><span>Base URL</span><input name="baseUrl" placeholder="https://integrate.api.nvidia.com/v1" required /></label>' +
       '<label class="field"><span>Auth style</span><select name="authStyle"><option value="bearer">bearer</option><option value="x-api-key">x-api-key</option></select></label>' +
       '<label class="field"><span>Models (comma separated)</span><input name="models" placeholder="nvidia/nemotron-3-ultra" /></label>' +
+      '<label class="field"><span>Provider API key (optional, encrypted at rest)</span><input name="apiKey" type="password" placeholder="Provider API key" /></label>' +
       '</div>' +
       '<label class="field"><span>Max output tokens</span><input name="maxOutputTokens" type="number" value="8" /></label>' +
       '<label class="row" style="gap:8px;font-size:13px"><input type="checkbox" name="allowPrivateNetwork" style="width:auto" /> Allow private-network base URL (self-hosted provider only; increases SSRF risk)</label>' +
@@ -155,6 +156,49 @@
     return '<h1>Client keys</h1><p class="lede">Keys your Cline/OpenCode clients use to call this relay. They are shown once at creation and stored only as a peppered hash. Rotating issues a new key and revokes the old one.</p>' +
       '<div class="panel"><form id="addkey" class="row"><input name="name" placeholder="key name" style="flex:1;min-width:180px" /><input name="rateLimitRpm" type="number" placeholder="rpm (optional)" style="width:160px" /><button class="btn" type="submit">Generate key</button></form><div id="keyresult" style="margin-top:12px"></div></div>' +
       '<div class="panel">' + (keys.length ? '<table><thead><tr><th>Name</th><th>Prefix</th><th>Status</th><th>Last used</th><th></th></tr></thead><tbody>'+list+'</tbody></table>' : '<div class="empty">No client keys yet.</div>') + '</div>';
+  }
+
+  function viewMaster(d) {
+    var exists = d.exists, mk = d.masterKey;
+    var shown = '';
+    if (state.masterKeyShown) {
+      shown = msg('ok', 'Master key created — shown once. Copy it now.') +
+        '<pre>'+esc(state.masterKeyShown.rawKey)+'</pre>' +
+        '<p class="muted" style="font-size:12px;margin-top:8px">Relay URL: '+esc(state.masterKeyShown.relayUrl)+'</p>';
+      state.masterKeyShown = null;
+    }
+    var body;
+    if (exists && mk) {
+      body = '<dl class="kv" style="margin:14px 0"><dt>Prefix</dt><dd>'+esc(mk.prefix)+'…</dd>' +
+        '<dt>Status</dt><dd>'+(mk.enabled?'<span class="pill ok">active</span>':'<span class="pill warn">disabled</span>')+'</dd>' +
+        '<dt>Last used</dt><dd>'+(mk.lastUsedAt?esc(new Date(mk.lastUsedAt).toLocaleString()):'—')+'</dd></dl>' +
+        '<div class="row"><button class="btn" id="rotmaster">Rotate master key</button></div>' +
+        '<p class="muted" style="font-size:12px;margin-top:12px">Use this single key + the relay URL in every client. No model name is required; requests are load-balanced across all provider keys.</p>';
+    } else {
+      body = '<div class="empty">No master key yet. Add a provider API key first — the master key is created automatically. You can also create one here.</div>' +
+        '<div class="row" style="margin-top:12px"><button class="btn" id="newmaster">Create master key</button></div>';
+    }
+    var urlLine = '<dl class="kv" style="margin:14px 0"><dt>Relay URL</dt><dd>'+esc(d.relayUrl||'')+'</dd></dl>';
+    return '<h1>Master key</h1><p class="lede">One gateway key that fronts every provider key. Clients call the relay URL with this key only — no model names needed.</p>' +
+      '<div class="panel"><h2>Gateway</h2>'+shown+urlLine+body+'<div id="masterresult" style="margin-top:12px"></div></div>';
+  }
+
+  function scorePill(score){
+    var cls = score >= 90 ? 'ok' : score >= 60 ? 'warn' : 'err';
+    return '<span class="pill '+cls+'">'+esc(score)+'</span>';
+  }
+
+  function viewScoreboard(d) {
+    var rows = d.scoreboard || [];
+    var list = rows.map(function(r){
+      return '<tr><td>'+scorePill(r.score)+'</td><td class="mono">'+esc(r.providerName)+' / '+esc(r.label)+'</td>' +
+        '<td class="mono">'+esc(r.keyHint||'')+'</td><td class="mono">'+fmtNum(r.requests)+'</td>' +
+        '<td class="mono">'+fmtNum(r.success)+'</td><td class="mono">'+fmtNum(r.error)+'</td>' +
+        '<td class="mono">'+fmtNum(r.totalTokens)+'</td><td class="mono">'+(r.avgLatencyMs==null?'—':r.avgLatencyMs+' ms')+'</td>' +
+        '<td class="mono">'+(r.lastUsedAt?esc(new Date(r.lastUsedAt).toLocaleString()):'—')+'</td></tr>';
+    }).join('');
+    return '<h1>Scoreboard</h1><p class="lede">Per-provider-key usage and health, ranked by activity. Score is the success rate (0–100).</p>' +
+      '<div class="panel">' + (rows.length ? '<table><thead><tr><th>Score</th><th>Provider / key</th><th>Hint</th><th>Requests</th><th>Success</th><th>Errors</th><th>Tokens</th><th>Avg latency</th><th>Last used</th></tr></thead><tbody>'+list+'</tbody></table>' : '<div class="empty">No usage recorded yet.</div>') + '</div>';
   }
 
   function viewUsage(d) {
@@ -205,6 +249,8 @@
       overview: function(){ return api('/api/admin/overview').then(function(d){ state.data.overview = d; return viewOverview(d); }); },
       providers: function(){ return api('/api/admin/providers').then(function(d){ state.data.providers = d; return viewProviders(d); }); },
       keys: function(){ return api('/api/admin/keys').then(function(d){ state.data.keys = d; return viewKeys(d); }); },
+      master: function(){ return api('/api/admin/master-key').then(function(d){ return viewMaster(d); }); },
+      scoreboard: function(){ return api('/api/admin/scoreboard').then(function(d){ state.data.scoreboard = d; return viewScoreboard(d); }); },
       usage: function(){ return api('/api/admin/usage?limit=100').then(function(d){ state.data.usage = d; return viewUsage(d); }); },
       context: function(){ return api('/api/admin/context/stats').then(function(d){ return viewContext(d); }); },
       settings: function(){ return viewSettings({}); },
@@ -244,7 +290,14 @@
         maxOutputTokens: Number(fd.get('maxOutputTokens'))||8,
         allowPrivateNetwork: fd.get('allowPrivateNetwork') ? true : false,
       };
-      try { await api('/api/admin/providers', { method:'POST', body: body }); state.tab='providers'; route(); }
+      if (fd.get('apiKey')) body.apiKey = fd.get('apiKey');
+      try {
+        var r = await api('/api/admin/providers', { method:'POST', body: body });
+        if (r.masterKey && r.masterKey.created) {
+          state.masterKeyShown = { rawKey: r.masterKey.rawKey, relayUrl: r.masterKey.relayUrl, prefix: r.masterKey.prefix };
+        }
+        route();
+      }
       catch(err){ document.getElementById('addprovresult').innerHTML = msg('err', err.message); }
     });
     // Credential add forms
@@ -273,6 +326,11 @@
     });
     root.querySelectorAll('button[data-rotate]').forEach(function(b){ b.addEventListener('click', async function(){ try{ var r=await api('/api/admin/keys/'+b.getAttribute('data-rotate')+'/rotate',{method:'POST',body:{}}); alert('New key (shown once):\n'+r.key.rawKey); route(); }catch(e){alert(e.message);} }); });
     root.querySelectorAll('button[data-delkey]').forEach(function(b){ b.addEventListener('click', async function(){ try{ await api('/api/admin/keys/'+b.getAttribute('data-delkey'), { method:'DELETE' }); route(); }catch(e){alert(e.message);} }); });
+    // Master key
+    var nm = document.getElementById('newmaster');
+    if (nm) nm.addEventListener('click', async function(){ try{ var r=await api('/api/admin/master-key',{method:'POST',body:{}}); state.masterKeyShown={rawKey:r.masterKey.rawKey,relayUrl:r.masterKey.relayUrl,prefix:r.masterKey.prefix}; route(); }catch(e){ document.getElementById('masterresult').innerHTML=msg('err',e.message); } });
+    var rm = document.getElementById('rotmaster');
+    if (rm) rm.addEventListener('click', async function(){ try{ var r=await api('/api/admin/master-key/rotate',{method:'POST',body:{}}); state.masterKeyShown={rawKey:r.masterKey.rawKey,relayUrl:r.masterKey.relayUrl,prefix:r.masterKey.prefix}; route(); }catch(e){ document.getElementById('masterresult').innerHTML=msg('err',e.message); } });
     // Context form
     var cf = document.getElementById('ctxform');
     if (cf) cf.addEventListener('submit', async function(e){

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { normalizeChatRequest, NormalizeError } from './normalize.js';
 import { executeRelay } from './relayService.js';
 import { executeStreamRelay, openStream } from './streamService.js';
+import { executeGateway, executeStreamGateway } from './gateway.js';
 
 export async function relayRoutes(fastify, opts) {
   const { config, credentialService, scheduler, contextSettings, relayKeyService, metrics, rateLimiter, logger } = opts;
@@ -30,10 +31,17 @@ export async function relayRoutes(fastify, opts) {
       });
     }
 
-    // 3. Validate + normalize the request.
+    // 3. Validate + normalize the request. For the master (gateway) key the
+    // `model` field is optional: any string is accepted and ignored, since the
+    // gateway load-balances across all provider keys server-side.
     let normalized;
     try {
-      normalized = normalizeChatRequest(request.body);
+      const isMaster = client.role === 'master';
+      const body = request.body;
+      if (isMaster && body && typeof body === 'object' && (body.model == null || String(body.model).trim() === '')) {
+        body.model = 'gateway';
+      }
+      normalized = normalizeChatRequest(body);
     } catch (err) {
       if (err instanceof NormalizeError) {
         return reply.code(400).send({ error: { code: err.code, message: err.message, field: err.field } });
@@ -48,15 +56,24 @@ export async function relayRoutes(fastify, opts) {
       // We hijack the raw response for SSE.
       reply.hijack();
       openStream(reply);
-      await executeStreamRelay({
-        db: opts.db, credentialService, scheduler, contextSettings, normalized, reply, requestId,
-      });
+      if (client.role === 'master') {
+        await executeStreamGateway({
+          db: opts.db, credentialService, scheduler, contextSettings, normalized, reply, requestId, relayKeyId: client.id,
+        });
+      } else {
+        await executeStreamRelay({
+          db: opts.db, credentialService, scheduler, contextSettings, normalized, reply, requestId,
+        });
+      }
       return reply;
     }
 
     // 5. Non-streaming path.
     try {
-      const result = await executeRelay({ db: opts.db, credentialService, scheduler, contextSettings, normalized });
+      const isMaster = client.role === 'master';
+      const result = isMaster
+        ? await executeGateway({ db: opts.db, credentialService, scheduler, contextSettings, normalized, relayKeyId: client.id })
+        : await executeRelay({ db: opts.db, credentialService, scheduler, contextSettings, normalized, relayKeyId: client.id });
       metrics.record({ status: result.usedFallback ? 'fallback' : 'success', fallback: result.usedFallback, latencyMs: result.latencyMs, promptTokens: result.usage && result.usage.promptTokens, completionTokens: result.usage && result.usage.completionTokens, totalTokens: result.usage && result.usage.totalTokens });
       reply.header('x-relay-request-id', result.requestId || requestId);
       return result.completion;

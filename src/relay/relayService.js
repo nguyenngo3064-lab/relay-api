@@ -64,7 +64,7 @@ async function forwardOnce({ provider, cred, forwarded, credentialService }) {
  * Execute a non-streaming relay request. Returns the OpenAI-compatible body or
  * throws a normalized RelayError.
  */
-export async function executeRelay({ db, credentialService, scheduler, contextSettings, normalized }) {
+export async function executeRelay({ db, credentialService, scheduler, contextSettings, normalized, relayKeyId = null }) {
   const model = normalized.model;
   const provider = findProviderForModel(db, model);
   if (!provider) {
@@ -96,7 +96,7 @@ export async function executeRelay({ db, credentialService, scheduler, contextSe
     try {
       const result = await forwardOnce({ provider, cred, forwarded, credentialService });
       scheduler.recordSuccess(cred.id);
-      recordUsage(db, { requestId: result.requestId || 'relay', kind: 'relay', providerId: provider.id, credentialId: cred.id, model, status: usedFallback ? 'fallback' : 'success', httpStatus: result.httpStatus, promptTokens: result.usage && result.usage.promptTokens != null ? result.usage.promptTokens : null, completionTokens: result.usage && result.usage.completionTokens != null ? result.usage.completionTokens : null, totalTokens: result.usage && result.usage.totalTokens != null ? result.usage.totalTokens : null, tokenSource: result.usage && result.usage.source ? result.usage.source : null, contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens, latencyMs: result.latencyMs });
+      recordUsage(db, { requestId: result.requestId || 'relay', kind: 'relay', providerId: provider.id, credentialId: cred.id, relayKeyId, model, status: usedFallback ? 'fallback' : 'success', httpStatus: result.httpStatus, promptTokens: result.usage && result.usage.promptTokens != null ? result.usage.promptTokens : null, completionTokens: result.usage && result.usage.completionTokens != null ? result.usage.completionTokens : null, totalTokens: result.usage && result.usage.totalTokens != null ? result.usage.totalTokens : null, tokenSource: result.usage && result.usage.source ? result.usage.source : null, contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens, latencyMs: result.latencyMs });
       return Object.assign({}, result, { contextMetrics: processed.metrics, usedFallback });
     } catch (err) {
       const code = classifyError(err);
@@ -111,7 +111,7 @@ export async function executeRelay({ db, credentialService, scheduler, contextSe
   }
 
   const failCode = lastError ? lastError.code : 'PROVIDER_ERROR';
-  recordUsage(db, { requestId: 'relay', kind: 'relay', providerId: provider.id, model, status: failCode === 'RATE_LIMITED' ? 'rate_limited' : 'error', errorCode: failCode, errorMessage: lastError ? lastError.message : 'Relay failed.', contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens });
+  recordUsage(db, { requestId: 'relay', kind: 'relay', providerId: provider.id, relayKeyId, model, status: failCode === 'RATE_LIMITED' ? 'rate_limited' : 'error', errorCode: failCode, errorMessage: lastError ? lastError.message : 'Relay failed.', contextTokensBefore: processed.metrics.originalEstimatedTokens, contextTokensAfter: processed.metrics.processedEstimatedTokens });
   if (processed.usedTransformed === false && processed.fallbackReason) {
     recordDiagnostic(db, { kind: 'compression_fallback', providerId: provider.id, detail: { reason: processed.fallbackReason } });
   }
