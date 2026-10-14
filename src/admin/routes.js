@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   listProviders, getProvider, getCredential, createProvider, updateProvider, deleteProvider,
+  usageTimeseries, statusBreakdown,
   listCredentials, deleteCredential, updateCredential,
   listRelayKeys, deleteRelayKey, setRelayKeyEnabled, getMasterRelayKey,
   getSettings, setSettings, listUsage, usageSummary, listDiagnostics, credentialScoreboard,
@@ -186,6 +187,7 @@ export async function adminRoutes(fastify, opts) {
       });
     }
     const { model, prompt, credentialId } = request.body || {};
+    const reqMax = request.body && request.body.maxTokens != null ? Math.min(Math.max(Number(request.body.maxTokens) || 1024, 1), 1000000) : 1024;
     if (typeof model !== 'string' || model.trim() === '') {
       return reply.code(400).send({ error: { code: 'INVALID_REQUEST', message: 'model is required.' } });
     }
@@ -195,7 +197,7 @@ export async function adminRoutes(fastify, opts) {
       credentialId: credentialId || null,
       model: model.trim(),
       prompt: testPrompt.slice(0, 4000),
-      maxTokens: 8,
+      maxTokens: reqMax,
     });
     return result;
   });
@@ -310,6 +312,18 @@ export async function adminRoutes(fastify, opts) {
     const limit = request.query.limit ? Number(request.query.limit) : 100;
     const since = request.query.since ? String(request.query.since) : null;
     return { summary: usageSummary(db, since), events: listUsage(db, { limit, since }) };
+  });
+
+  fastify.get('/api/admin/charts', adminPre, async (request) => {
+    const buckets = request.query.buckets ? Number(request.query.buckets) : 24;
+    const bucketMinutes = request.query.bucketMinutes ? Number(request.query.bucketMinutes) : 60;
+    const since = request.query.since ? String(request.query.since) : null;
+    return {
+      live: metrics.snapshot(),
+      timeseries: usageTimeseries(db, { buckets, bucketMinutes }),
+      breakdown: statusBreakdown(db, since),
+      scoreboard: credentialScoreboard(db, since),
+    };
   });
 
   fastify.get('/api/admin/diagnostics', adminPre, async (request) => {

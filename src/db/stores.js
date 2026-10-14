@@ -386,6 +386,32 @@ export function listUsage(db, { limit = 100, since = null } = {}) {
   return db.prepare('SELECT * FROM usage_events ORDER BY id DESC LIMIT ?').all(safeLimit);
 }
 
+export function usageTimeseries(db, { buckets = 24, bucketMinutes = 60 } = {}) {
+  const n = Math.min(Math.max(parseInt(buckets, 10) || 24, 1), 168);
+  const mins = Math.min(Math.max(parseInt(bucketMinutes, 10) || 60, 1), 1440);
+  const nowMs = Date.now();
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const end = new Date(nowMs - i * mins * 60 * 1000).toISOString();
+    const start = new Date(nowMs - (i + 1) * mins * 60 * 1000).toISOString();
+    const row = db.prepare(`SELECT COUNT(*) as total,
+      SUM(CASE WHEN status IN ('success','fallback') THEN 1 ELSE 0 END) as ok,
+      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as err,
+      SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END) as limited,
+      SUM(COALESCE(total_tokens,0)) as tokens
+      FROM usage_events WHERE created_at >= ? AND created_at < ?`).get(start, end);
+    out.push({ start, end, total: row.total || 0, ok: row.ok || 0, err: row.err || 0, limited: row.limited || 0, tokens: row.tokens || 0 });
+  }
+  return out;
+}
+
+export function statusBreakdown(db, since = null) {
+  const where = since ? 'WHERE created_at >= ?' : '';
+  const args = since ? [since] : [];
+  return db.prepare(`SELECT status as status, COUNT(*) as count,
+    SUM(COALESCE(total_tokens,0)) as tokens FROM usage_events ${where} GROUP BY status`).all(...args);
+}
+
 export function usageSummary(db, since = null) {
   const where = since ? 'WHERE created_at >= ?' : '';
   const args = since ? [since] : [];

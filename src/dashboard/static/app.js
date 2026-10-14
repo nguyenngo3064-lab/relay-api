@@ -65,8 +65,8 @@
   }
 
   function shell(inner) {
-    var tabs = ['overview','providers','keys','master','scoreboard','usage','context','settings'];
-    var labels = { overview:'Overview', providers:'Providers', keys:'Client keys', master:'Master key', scoreboard:'Scoreboard', usage:'Usage', context:'Context engine', settings:'Security' };
+    var tabs = ['overview','charts','providers','keys','master','scoreboard','usage','context','settings'];
+    var labels = { overview:'Overview', charts:'Charts', providers:'Providers', keys:'Client keys', master:'Master key', scoreboard:'Scoreboard', usage:'Usage', context:'Context engine', settings:'Security' };
     var nav = tabs.map(function(t){ return '<button data-tab="'+t+'" class="'+(state.tab===t?'active':'')+'">'+labels[t]+'</button>'; }).join('');
     return '<div class="wrap">' +
       '<header class="top"><div class="brand"><span class="dot"></span>HUAN RELAY <small>self-hosted AI gateway</small></div>' +
@@ -142,7 +142,7 @@
       '<label class="field"><span>Models (comma separated)</span><input name="models" placeholder="nvidia/nemotron-3-ultra" /></label>' +
       '<label class="field"><span>Provider API key (optional, encrypted at rest)</span><input name="apiKey" type="password" placeholder="Provider API key" /></label>' +
       '</div>' +
-      '<label class="field"><span>Max output tokens</span><input name="maxOutputTokens" type="number" value="8" /></label>' +
+      '<label class="field"><span>Max output tokens</span><input name="maxOutputTokens" type="number" value="1024" min="1" max="1000000" /></label>' +
       '<label class="row" style="gap:8px;font-size:13px"><input type="checkbox" name="allowPrivateNetwork" style="width:auto" /> Allow private-network base URL (self-hosted provider only; increases SSRF risk)</label>' +
       '<div class="row"><button class="btn" type="submit">Add provider</button></div></form>' +
       '<div id="addprovresult" style="margin-top:12px"></div></div>';
@@ -216,6 +216,63 @@
   }
   function card(k, v){ return '<div class="card"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div></div>'; }
 
+  function barChart(ts) {
+    ts = ts || [];
+    var max = 1, i;
+    for (i = 0; i < ts.length; i++) if (ts[i].total > max) max = ts[i].total;
+    var W = 640, H = 180, pad = 8, gap = 3;
+    var bw = (W - pad * 2) / Math.max(1, ts.length);
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" role="img" aria-label="Requests per bucket">';
+    for (i = 0; i < ts.length; i++) {
+      var b = ts[i];
+      var h = Math.round((b.total / max) * (H - 40));
+      var x = (pad + i * bw + 1).toFixed(1);
+      var y = H - 20 - h;
+      var tip = new Date(b.start).toLocaleString() + ': ' + b.total + ' req / ' + fmtNum(b.tokens) + ' tok';
+      s += '<rect x="' + x + '" y="' + y + '" width="' + Math.max(1, bw - gap).toFixed(1) + '" height="' + h + '" rx="2" fill="#2dd4bf"><title>' + esc(tip) + '</title></rect>';
+    }
+    return s + '</svg>';
+  }
+
+  function pieChart(parts) {
+    parts = parts || [];
+    var total = 0, i;
+    for (i = 0; i < parts.length; i++) total += parts[i].count;
+    if (!total) return '<div class="empty">No data yet.</div>';
+    var colors = { success: '#34d399', fallback: '#2dd4bf', error: '#f87171', rate_limited: '#fbbf24' };
+    var cx = 90, cy = 90, r = 70, a0 = -Math.PI / 2, s = '';
+    for (i = 0; i < parts.length; i++) {
+      var frac = parts[i].count / total;
+      var a1 = a0 + frac * Math.PI * 2;
+      var large = frac > 0.5 ? 1 : 0;
+      var x0 = (cx + r * Math.cos(a0)).toFixed(1), y0 = (cy + r * Math.sin(a0)).toFixed(1);
+      var x1 = (cx + r * Math.cos(a1)).toFixed(1), y1 = (cy + r * Math.sin(a1)).toFixed(1);
+      var col = colors[parts[i].status] || '#94a3b8';
+      if (parts[i].count === total) {
+        s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + col + '"><title>' + esc(parts[i].status + ': ' + parts[i].count) + '</title></circle>';
+      } else {
+        s += '<path d="M' + cx + ' ' + cy + ' L' + x0 + ' ' + y0 + ' A' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x1 + ' ' + y1 + ' Z" fill="' + col + '"><title>' + esc(parts[i].status + ': ' + parts[i].count) + '</title></path>';
+      }
+      a0 = a1;
+    }
+    var leg = parts.map(function (p) {
+      return '<span class="pill mute" style="border:1px solid var(--line)">' + esc(p.status) + ': ' + fmtNum(p.count) + '</span>';
+    }).join(' ');
+    return '<svg viewBox="0 0 180 180" style="width:180px;height:auto" role="img" aria-label="Status breakdown">' + s + '</svg><div class="row" style="margin-top:10px;gap:6px">' + leg + '</div>';
+  }
+
+  function viewCharts(d) {
+    var ts = d.timeseries || [], bd = d.breakdown || [], lv = d.live || {};
+    var tot = 0, i;
+    for (i = 0; i < ts.length; i++) tot += ts[i].total;
+    return '<h1>Charts <span class="pill info">realtime</span></h1>' +
+      '<p class="lede">Requests per hour (last 24 buckets) and status breakdown. Auto-refreshes every 5 seconds while this tab is open.</p>' +
+      '<div class="grid cards">' + card('Requests (24h)', fmtNum(tot)) + card('Live RPM', fmtNum(lv.requestsPerMinute || 0)) + card('Live total', fmtNum(lv.total || 0)) + '</div>' +
+      '<div class="panel"><h2>Requests per hour</h2><div id="barwrap">' + barChart(ts) + '</div></div>' +
+      '<div class="panel"><h2>Status breakdown</h2><div id="piewrap">' + pieChart(bd) + '</div></div>' +
+      '<div class="muted" style="font-size:12px" id="charts-meta">Updated ' + esc(new Date().toLocaleTimeString()) + '</div>';
+  }
+
   function viewContext(d) {
     var s = d.settings || {};
     return '<h1>Context engine</h1><p class="lede">Filters and compresses conversation context before forwarding, to reduce input tokens while preserving required information. Semantic summarization is disabled by default and never uses a paid API unless explicitly enabled.</p>' +
@@ -247,6 +304,7 @@
     if (!state.authed) { return boot(); }
     var loaders = {
       overview: function(){ return api('/api/admin/overview').then(function(d){ state.data.overview = d; return viewOverview(d); }); },
+      charts: function(){ return api('/api/admin/charts?buckets=24&bucketMinutes=60').then(function(d){ state.data.charts = d; return viewCharts(d); }); },
       providers: function(){ return api('/api/admin/providers').then(function(d){ state.data.providers = d; return viewProviders(d); }); },
       keys: function(){ return api('/api/admin/keys').then(function(d){ state.data.keys = d; return viewKeys(d); }); },
       master: function(){ return api('/api/admin/master-key').then(function(d){ return viewMaster(d); }); },
@@ -262,11 +320,30 @@
       root.innerHTML = shell(html);
       bindShell();
       bindTab();
+      bindCharts();
     } catch (err) {
       if (/Authentication required/i.test(err.message)) { state.authed = false; state.csrf=''; return boot(); }
       root.innerHTML = shell(msg('err', err.message));
       bindShell();
     }
+  }
+
+  var chartsTimer = null;
+  function bindCharts() {
+    if (chartsTimer) { clearInterval(chartsTimer); chartsTimer = null; }
+    if (state.tab !== 'charts') return;
+    chartsTimer = setInterval(async function () {
+      if (state.tab !== 'charts' || !state.authed) { clearInterval(chartsTimer); chartsTimer = null; return; }
+      try {
+        var d = await api('/api/admin/charts?buckets=24&bucketMinutes=60');
+        var bw = document.getElementById('barwrap');
+        if (bw) bw.innerHTML = barChart(d.timeseries || []);
+        var pw = document.getElementById('piewrap');
+        if (pw) pw.innerHTML = pieChart(d.breakdown || []);
+        var m = document.getElementById('charts-meta');
+        if (m) m.textContent = 'Updated ' + new Date().toLocaleTimeString();
+      } catch (e) { /* keep last chart on transient errors */ }
+    }, 5000);
   }
 
   function bindTab() {
@@ -287,7 +364,7 @@
       var body = {
         name: fd.get('name'), baseUrl: fd.get('baseUrl'), authStyle: fd.get('authStyle'),
         models: String(fd.get('models')||'').split(',').map(function(x){return x.trim();}).filter(Boolean),
-        maxOutputTokens: Number(fd.get('maxOutputTokens'))||8,
+        maxOutputTokens: Number(fd.get('maxOutputTokens'))||1024,
         allowPrivateNetwork: fd.get('allowPrivateNetwork') ? true : false,
       };
       if (fd.get('apiKey')) body.apiKey = fd.get('apiKey');

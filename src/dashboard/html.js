@@ -51,19 +51,31 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     line-height:1.6; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
     min-height:100vh; position:relative; overflow-x:hidden;
   }
-  /* Ambient animated gradient field behind everything. */
+  /* Ambient animated 7-colour rainbow field behind everything. */
   body::before {
-    content:""; position:fixed; inset:-20vh -20vw; z-index:-2; pointer-events:none;
-    background:
-      radial-gradient(42vw 42vw at 12% 8%, rgba(45,212,191,0.16), transparent 60%),
-      radial-gradient(38vw 38vw at 88% 18%, rgba(56,130,246,0.12), transparent 62%),
-      radial-gradient(46vw 46vw at 70% 96%, rgba(168,85,247,0.10), transparent 60%);
-    filter: blur(6px); animation: drift 26s var(--ease) infinite alternate;
+    content:""; position:fixed; inset:-40vh -40vw; z-index:-2; pointer-events:none;
+    background: linear-gradient(115deg,
+      rgba(255,0,0,0.14), rgba(255,127,0,0.13), rgba(255,223,0,0.12),
+      rgba(0,200,83,0.13), rgba(0,150,255,0.13), rgba(80,60,220,0.13),
+      rgba(175,40,200,0.13), rgba(255,0,0,0.14));
+    background-size: 300% 300%;
+    filter: blur(46px) saturate(1.35);
+    opacity: .55;
+    animation: rainbow-drift 18s linear infinite;
   }
-  /* Fine grain overlay to break digital flatness. */
+  /* Secondary slow aurora wash for depth. */
   body::after {
-    content:""; position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.5;
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    content:""; position:fixed; inset:0; z-index:-3; pointer-events:none; opacity:.5;
+    background:
+      radial-gradient(42vw 42vw at 12% 8%, rgba(45,212,191,0.10), transparent 60%),
+      radial-gradient(38vw 38vw at 88% 18%, rgba(56,130,246,0.08), transparent 62%),
+      radial-gradient(46vw 46vw at 70% 96%, rgba(255,80,160,0.08), transparent 60%);
+    animation: drift 26s var(--ease) infinite alternate;
+  }
+  @keyframes rainbow-drift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
   }
   @keyframes drift {
     0%   { transform: translate3d(0,0,0) scale(1); }

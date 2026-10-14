@@ -100,7 +100,7 @@ export function createProviderService(db, credentialService) {
    * Run the admin Test Request: a single real upstream request, no retries,
    * no fallback. Returns a structured result.
    */
-  async function testProvider({ providerId, credentialId = null, model, prompt, maxTokens = 8 }) {
+  async function testProvider({ providerId, credentialId = null, model, prompt, maxTokens = 1024 }) {
     const provider = getProvider(db, providerId);
     if (!provider) return { success: false, error: { code: 'INVALID_CONFIGURATION', message: 'Provider not found.' } };
     if (!provider.enabled) return { success: false, providerId, model, error: { code: 'INVALID_CONFIGURATION', message: 'Provider is disabled.' } };
@@ -124,7 +124,7 @@ export function createProviderService(db, credentialService) {
       model,
       messages: [{ role: 'user', content: String(prompt).slice(0, 4000) }],
       stream: false,
-      maxTokens: Math.min(Number(maxTokens) || 8, provider.maxOutputTokens || 8),
+      maxTokens: Math.min(Number(maxTokens) || 1024, provider.maxOutputTokens || 1024),
     };
     const body = adapter.buildRequest(normalized, provider);
     const url = endpointUrlFor(provider, adapter.endpointPath);
